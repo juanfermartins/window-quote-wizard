@@ -207,27 +207,72 @@ function useAuth() {
 }
 
 // ─── APP DATA HOOK ────────────────────────────────────────────────────────────
-function useAppData() {
+// companyId: if provided, loads company-specific + global (null) records
+// if null, loads ALL records (for superadmin)
+function useAppData(companyId = null) {
   const [products, setProducts] = useState([]);
   const [multipliers, setMultipliers] = useState([]);
   const [services, setServices] = useState([]);
   const [cityRules, setCityRules] = useState([]);
+  const [allProducts, setAllProducts] = useState([]); // superadmin: all products
+  const [allServices, setAllServices] = useState([]); // superadmin: all services
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    Promise.all([
-      supabase.from('products').select('*').eq('active',true).order('name'),
-      supabase.from('multipliers').select('*').eq('active',true),
-      supabase.from('services').select('*').eq('active',true),
+  const load = async () => {
+    setLoading(true);
+
+    // Always load city rules and multipliers globally
+    const [mRes, cRes] = await Promise.all([
+      supabase.from('multipliers').select('*').eq('active', true),
       supabase.from('city_rules').select('*').order('city'),
-    ]).then(([p,m,s,c]) => {
-      if(p.data) setProducts(p.data);
-      if(m.data) setMultipliers(m.data);
-      if(s.data) setServices(s.data);
-      if(c.data) setCityRules(c.data);
-      setLoading(false);
-    });
-  }, []);
+    ]);
+    if (mRes.data) setMultipliers(mRes.data);
+    if (cRes.data) setCityRules(cRes.data);
+
+    if (companyId) {
+      // Load company-specific + global products/services
+      // Company-specific overrides global when same name exists
+      const [pRes, sRes] = await Promise.all([
+        supabase.from('products').select('*').eq('active', true)
+          .or(`company_id.eq.${companyId},company_id.is.null`).order('name'),
+        supabase.from('services').select('*').eq('active', true)
+          .or(`company_id.eq.${companyId},company_id.is.null`),
+      ]);
+      if (pRes.data) {
+        // If company has own version of a product, prefer it over global
+        const seen = new Set();
+        const merged = pRes.data.filter(p => {
+          const key = p.name.toLowerCase();
+          if (p.company_id && !seen.has(key)) { seen.add(key); return true; }
+          if (!p.company_id && !seen.has(key)) { seen.add(key); return true; }
+          return false;
+        });
+        setProducts(merged);
+      }
+      if (sRes.data) {
+        const seen = new Set();
+        const merged = sRes.data.filter(s => {
+          const key = s.name.toLowerCase();
+          if (s.company_id && !seen.has(key)) { seen.add(key); return true; }
+          if (!s.company_id && !seen.has(key)) { seen.add(key); return true; }
+          return false;
+        });
+        setServices(merged);
+      }
+    } else {
+      // No companyId = load all (superadmin view)
+      const [pRes, sRes] = await Promise.all([
+        supabase.from('products').select('*').eq('active', true).order('company_id').order('name'),
+        supabase.from('services').select('*').eq('active', true),
+      ]);
+      if (pRes.data) { setProducts(pRes.data); setAllProducts(pRes.data); }
+      if (sRes.data) { setServices(sRes.data); setAllServices(sRes.data); }
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [companyId]);
 
   const matMult = Object.fromEntries(multipliers.filter(m=>m.category==='material').map(m=>[m.name,parseFloat(m.value)]));
   const colMult = Object.fromEntries(multipliers.filter(m=>m.category==='color').map(m=>[m.name,parseFloat(m.value)]));
@@ -239,7 +284,7 @@ function useAppData() {
     return Math.round((prod?.base_price||300)*(matMult[w.material]||1)*(colMult[w.color]||1)*(glsMult[w.glass]||1)*sizeMult(w.width||36,w.height||48)*(w.qty||1));
   };
 
-  return { products, multipliers, services, cityRules, cityMap, loading, calcPrice, matMult, colMult, glsMult };
+  return { products, multipliers, services, cityRules, cityMap, loading, calcPrice, matMult, colMult, glsMult, allProducts, allServices, reload: load };
 }
 
 // ─── SUBSCRIPTION HOOK ────────────────────────────────────────────────────────
@@ -1011,7 +1056,7 @@ function SuperAdminPanel({ appData, auth }) {
       )}
 
       {/* PRODUCTS */}
-      {tab==="products"&&<ProductsAdmin appData={appData} showToast={showToast}/>}
+      {tab==="products"&&<ProductsAdmin appData={appData} showToast={showToast} companies={companies}/>}
 
       {/* CITIES */}
       {tab==="cities"&&<CitiesAdmin appData={appData} showToast={showToast}/>}
@@ -1081,7 +1126,7 @@ function CompanyAdminPanel({ appData, auth }) {
         </div>
       </div>
       <div className="admin-nav">
-        {[{id:"team",label:"👥 My Team"},{id:"quotes",label:"📋 Quotes"}].map(t=>(
+        {[{id:"team",label:"👥 My Team"},{id:"quotes",label:"📋 Quotes"},{id:"catalog",label:"🪟 My Catalog"}].map(t=>(
           <button key={t.id} className={`admin-nav-item ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id)}>{t.label}</button>
         ))}
       </div>
@@ -1155,44 +1200,161 @@ function CompanyAdminPanel({ appData, auth }) {
           {selQuote&&<QuoteDetailModal quote={selQuote} onClose={()=>setSelQuote(null)} onStatusChange={async(id,status)=>{await updateStatus(id,status);setSelQuote(q=>({...q,status}));}}/>}
         </div>
       )}
+
+      {tab==="catalog"&&(
+        <div className="fade-up">
+          <div className="info-box" style={{marginBottom:20}}>
+            <Icon name="info" size={14}/>
+            <div>
+              <strong>Your custom catalog</strong> — products you add here override global products of the same name for your contractors only. Global products are still available unless you create a custom version.
+            </div>
+          </div>
+          <ProductsAdmin appData={appData} showToast={t=>setToast({message:t,type:"success"})} companyId={auth.companyId} companies={[]}/>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── PRODUCTS ADMIN ───────────────────────────────────────────────────────────
-function ProductsAdmin({ appData, showToast }) {
-  const {products}=appData;
-  const [modal,setModal]=useState(null);const [saving,setSaving]=useState(false);
-  const save=async(form)=>{
+// companyId: if set, this admin can only manage their company's products
+// companies: list of all companies (superadmin only, for the scope dropdown)
+function ProductsAdmin({ appData, showToast, companyId = null, companies = [] }) {
+  const { products, reload } = appData;
+  const [modal, setModal] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState('all'); // 'all' | 'global' | company uuid
+
+  const save = async (form) => {
     setSaving(true);
-    if(form.id)await supabase.from('products').update({name:form.name,base_price:parseInt(form.base_price)}).eq('id',form.id);
-    else await supabase.from('products').insert({name:form.name,base_price:parseInt(form.base_price)});
-    setSaving(false);setModal(null);showToast("Saved ✓");
+    const payload = {
+      name: form.name,
+      base_price: parseInt(form.base_price),
+      // company_id: null = global; uuid = company-specific
+      company_id: form.scope === 'global' ? null : (form.scope || companyId || null),
+    };
+    if (form.id) await supabase.from('products').update(payload).eq('id', form.id);
+    else await supabase.from('products').insert({ ...payload, active: true });
+    setSaving(false); setModal(null); showToast("Product saved ✓");
+    if (reload) reload();
   };
-  return(
+
+  const deactivate = async (id) => {
+    if (!confirm("Deactivate this product?")) return;
+    await supabase.from('products').update({ active: false }).eq('id', id);
+    showToast("Product deactivated");
+    if (reload) reload();
+  };
+
+  // Filter display
+  const visible = products.filter(p => {
+    if (filter === 'all') return true;
+    if (filter === 'global') return !p.company_id;
+    return p.company_id === filter;
+  });
+
+  const scopeLabel = (p) => {
+    if (!p.company_id) return <span className="badge badge-gray">🌐 Global</span>;
+    const co = companies.find(c => c.id === p.company_id);
+    return <span className="badge badge-blue">🏢 {co?.name || 'Company'}</span>;
+  };
+
+  return (
     <div className="fade-up">
-      <div style={{display:'flex',justifyContent:'space-between',marginBottom:20}}>
-        <h3 style={{fontWeight:700,fontSize:18}}>Products</h3>
-        <button className="btn btn-primary btn-sm" onClick={()=>setModal({name:'',base_price:''})}><Icon name="plus"/> Add</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h3 style={{ fontWeight: 700, fontSize: 18 }}>Products</h3>
+        <button className="btn btn-primary btn-sm" onClick={() => setModal({ name: '', base_price: '', scope: companyId || 'global' })}>
+          <Icon name="plus" /> Add Product
+        </button>
       </div>
+
+      {/* Filter bar — only shown to superadmin (when companies list is passed) */}
+      {companies.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {[{ id: 'all', label: 'All' }, { id: 'global', label: '🌐 Global' }, ...companies.map(c => ({ id: c.id, label: `🏢 ${c.name}` }))].map(f => (
+            <button key={f.id} className={`pill ${filter === f.id ? 'selected' : ''}`} onClick={() => setFilter(f.id)} style={{ fontSize: 12, padding: '5px 12px' }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Type</th><th>Base Price</th><th>Actions</th></tr></thead>
-          <tbody>{products.map(p=>(
-            <tr key={p.id}><td style={{fontWeight:600}}>{p.name}</td><td><span className="mono">{fmt(p.base_price)}</span></td>
-              <td><button className="btn btn-secondary btn-sm" onClick={()=>setModal({...p})}><Icon name="edit" size={12}/></button></td></tr>
-          ))}</tbody>
+          <thead>
+            <tr>
+              <th>Product Name</th>
+              <th>Base Price</th>
+              {companies.length > 0 && <th>Scope</th>}
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map(p => (
+              <tr key={p.id}>
+                <td style={{ fontWeight: 600 }}>{p.name}</td>
+                <td><span className="mono">{fmt(p.base_price)}</span></td>
+                {companies.length > 0 && <td>{scopeLabel(p)}</td>}
+                <td>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setModal({ ...p, scope: p.company_id || 'global' })}>
+                      <Icon name="edit" size={12} />
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => deactivate(p.id)}>
+                      <Icon name="trash" size={12} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {visible.length === 0 && (
+              <tr><td colSpan={4} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No products found</td></tr>
+            )}
+          </tbody>
         </table>
       </div>
-      {modal&&(
-        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setModal(null)}>
+
+      {/* Info box explaining global vs company */}
+      {companies.length > 0 && (
+        <div className="info-box" style={{ marginTop: 16 }}>
+          <Icon name="info" size={14} />
+          <span><strong>Global</strong> products appear in every company's Wizard. <strong>Company</strong> products override globals of the same name for that company only.</span>
+        </div>
+      )}
+
+      {/* Modal */}
+      {modal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
           <div className="modal">
-            <div style={{fontWeight:700,fontSize:17,marginBottom:16}}>{modal.id?'Edit':'Add'} Product</div>
-            <div className="field"><label className="label">Name</label><input className="input" value={modal.name} onChange={e=>setModal({...modal,name:e.target.value})}/></div>
-            <div className="field"><label className="label">Base Price ($)</label><input className="input" type="number" value={modal.base_price} onChange={e=>setModal({...modal,base_price:e.target.value})}/></div>
-            <div style={{display:'flex',gap:10}}>
-              <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setModal(null)}>Cancel</button>
-              <button className="btn btn-primary" style={{flex:2}} disabled={saving} onClick={()=>save(modal)}>{saving?"...":<><Icon name="save"/> Save</>}</button>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>{modal.id ? 'Edit' : 'Add'} Product</div>
+
+            <div className="field">
+              <label className="label">Product Name</label>
+              <input className="input" placeholder="e.g. Triple Pane Premium" value={modal.name} onChange={e => setModal({ ...modal, name: e.target.value })} />
+            </div>
+
+            <div className="field">
+              <label className="label">Base Price ($)</label>
+              <input className="input" type="number" placeholder="350" value={modal.base_price} onChange={e => setModal({ ...modal, base_price: e.target.value })} />
+            </div>
+
+            {/* Scope selector — only for superadmin */}
+            {companies.length > 0 && (
+              <div className="field">
+                <label className="label">Assign To</label>
+                <select className="select" value={modal.scope || 'global'} onChange={e => setModal({ ...modal, scope: e.target.value })}>
+                  <option value="global">🌐 Global (all companies)</option>
+                  {companies.map(c => <option key={c.id} value={c.id}>🏢 {c.name}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Global products appear for everyone. Company products only appear for that company's contractors.</div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModal(null)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 2 }} disabled={saving || !modal.name || !modal.base_price} onClick={() => save(modal)}>
+                {saving ? "Saving..." : <><Icon name="save" /> Save Product</>}
+              </button>
             </div>
           </div>
         </div>
@@ -1278,7 +1440,8 @@ function CompanyForm({ data, onSave, onClose, saving }) {
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App() {
   const auth = useAuth();
-  const appData = useAppData();
+  // Contractors & company admins get filtered data; superadmin gets all
+  const appData = useAppData(auth.isSuperAdmin ? null : auth.companyId);
 
   if (auth.loading) return <><style>{css}</style><LoadingScreen/></>;
   if (!auth.user) return <><style>{css}</style><LoginScreen onLogin={auth.signIn}/></>;
