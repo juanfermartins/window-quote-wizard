@@ -112,6 +112,24 @@ const css = `
   .sub-card { background: linear-gradient(135deg, #1A1A1A 0%, #2D2D2D 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; }
   .usage-bar { height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; margin-top: 8px; }
   .usage-fill { height: 100%; background: linear-gradient(90deg, #60A5FA, #34D399); border-radius: 4px; transition: width 0.6s ease; }
+  .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .plan-card { border: 2px solid ${T.border}; border-radius: 16px; padding: 20px; cursor: pointer; transition: all 0.2s; position: relative; }
+  .plan-card:hover { border-color: ${T.accent}; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(37,99,235,0.12); }
+  .plan-card.current { border-color: ${T.accent}; background: ${T.accentLight}; }
+  .plan-card.popular::before { content: 'POPULAR'; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: ${T.accent}; color: white; font-size: 10px; font-weight: 700; padding: 2px 10px; border-radius: 100px; letter-spacing: 0.5px; }
+  .plan-name { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+  .plan-price { font-size: 28px; font-weight: 800; font-family: 'DM Mono'; color: ${T.accent}; }
+  .plan-price span { font-size: 14px; font-weight: 400; color: ${T.textMuted}; font-family: 'DM Sans'; }
+  .quota-bar { height: 6px; background: ${T.border}; border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .quota-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+  .quota-fill.ok { background: linear-gradient(90deg, #34D399, #60A5FA); }
+  .quota-fill.warning { background: linear-gradient(90deg, #FBBF24, #F59E0B); }
+  .quota-fill.danger { background: linear-gradient(90deg, #F87171, #EF4444); }
+  .no-quota-modal { text-align: center; padding: 12px 0; }
+  .no-quota-icon { font-size: 48px; margin-bottom: 16px; }
+  .sub-stat { background: ${T.surfaceAlt}; border-radius: 12px; padding: 16px; text-align: center; }
+  .sub-stat-value { font-size: 28px; font-weight: 800; font-family: 'DM Mono'; color: ${T.text}; }
+  .sub-stat-label { font-size: 12px; color: ${T.textMuted}; margin-top: 4px; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
   .modal { background: white; border-radius: 16px; padding: 24px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
   .loading { display: flex; align-items: center; justify-content: center; padding: 40px; color: ${T.textMuted}; font-size: 14px; gap: 10px; }
@@ -220,6 +238,121 @@ function useAppData() {
   };
 
   return { products, multipliers, services, cityRules, cityRulesMap, loading, refetch: fetchAll, calcWindowPrice, materialMult, colorMult, glassMult };
+}
+
+// ─── SUBSCRIPTION HOOK ───────────────────────────────────────────────────────
+// For demo we use the first active subscription. In production each user has their own.
+function useSubscription() {
+  const [subscription, setSubscription] = useState(null);
+  const [plan, setPlan] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = async () => {
+    setLoading(true);
+    const [subRes, plansRes] = await Promise.all([
+      supabase.from('subscriptions').select('*, plans(*)').eq('status', 'active').limit(1).single(),
+      supabase.from('plans').select('*').eq('active', true).order('price_monthly'),
+    ]);
+    if (subRes.data) { setSubscription(subRes.data); setPlan(subRes.data.plans); }
+    if (plansRes.data) setPlans(plansRes.data);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetch(); }, []);
+
+  const consumeQuote = async () => {
+    if (!subscription) return { allowed: false, reason: 'No active subscription' };
+    const limit = plan?.quote_limit ?? 0;
+    const used = subscription.quotes_used ?? 0;
+    // -1 = unlimited (Enterprise)
+    if (limit !== -1 && used >= limit) {
+      return { allowed: false, reason: 'quota_exceeded', used, limit, overage: plan?.overage_price };
+    }
+    const { error } = await supabase
+      .from('subscriptions')
+      .update({ quotes_used: used + 1 })
+      .eq('id', subscription.id);
+    if (error) return { allowed: false, reason: 'error' };
+    setSubscription(s => ({ ...s, quotes_used: used + 1 }));
+    return { allowed: true, remaining: limit === -1 ? '∞' : limit - used - 1 };
+  };
+
+  const changePlan = async (planId) => {
+    await supabase.from('subscriptions').update({ plan_id: planId }).eq('id', subscription.id);
+    await fetch();
+  };
+
+  const pctUsed = () => {
+    if (!plan || plan.quote_limit === -1) return 0;
+    return Math.min(100, Math.round((subscription?.quotes_used / plan.quote_limit) * 100));
+  };
+
+  const quotaColor = () => {
+    const p = pctUsed();
+    if (p >= 90) return 'danger';
+    if (p >= 70) return 'warning';
+    return 'ok';
+  };
+
+  return { subscription, plan, plans, loading, consumeQuote, changePlan, refetch: fetch, pctUsed, quotaColor };
+}
+
+// ─── NO QUOTA MODAL ───────────────────────────────────────────────────────────
+function NoQuotaModal({ plan, plans, onUpgrade, onClose }) {
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="no-quota-modal">
+          <div className="no-quota-icon">🚫</div>
+          <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 8 }}>Quote Limit Reached</h2>
+          <p style={{ fontSize: 14, color: T.textMuted, marginBottom: 20 }}>
+            You've used all <strong>{plan?.quote_limit}</strong> quotes in your <strong>{plan?.name}</strong> plan this period.
+          </p>
+          {plan?.overage_price > 0 && (
+            <div className="info-box" style={{ textAlign: 'left', marginBottom: 20 }}>
+              <Icon name="info" size={15} />
+              <span>You can continue at <strong>${plan.overage_price}/quote</strong> overage rate, or upgrade your plan.</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+            {plans.filter(p => p.id !== plan?.id && (p.quote_limit === -1 || p.quote_limit > (plan?.quote_limit || 0))).map(p => (
+              <div key={p.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, cursor: 'pointer' }}
+                onClick={() => onUpgrade(p.id)}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, color: T.textMuted }}>{p.quote_limit === -1 ? 'Unlimited' : p.quote_limit} quotes/mo</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: 800, fontFamily: 'DM Mono', color: T.accent }}>${p.price_monthly}<span style={{ fontSize: 11, fontWeight: 400, color: T.textMuted }}>/mo</span></div>
+                  <span className="badge badge-blue" style={{ marginTop: 4 }}>Upgrade →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-secondary btn-full" onClick={onClose}>Maybe Later</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION PANEL (for both wizard top bar and admin) ───────────────────
+function SubscriptionBadge({ subscription, plan, pctUsed, quotaColor }) {
+  if (!subscription || !plan) return null;
+  const remaining = plan.quote_limit === -1 ? '∞' : plan.quote_limit - subscription.quotes_used;
+  const isLow = pctUsed() >= 80;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: isLow ? T.dangerLight : T.surfaceAlt, borderRadius: 10, border: `1px solid ${isLow ? '#FCA5A5' : T.border}` }}>
+      <div style={{ fontSize: 12 }}>
+        <span style={{ fontWeight: 700, color: isLow ? T.danger : T.text }}>{remaining}</span>
+        <span style={{ color: T.textMuted }}> quotes left</span>
+      </div>
+      <div style={{ width: 48, height: 4, background: T.border, borderRadius: 2, overflow: 'hidden' }}>
+        <div className={`quota-fill ${quotaColor()}`} style={{ width: `${pctUsed()}%`, height: '100%' }} />
+      </div>
+    </div>
+  );
 }
 
 // ─── STEP 1 ───────────────────────────────────────────────────────────────────
@@ -642,8 +775,9 @@ function PayDeposit({ downAmt }) {
 }
 
 // ─── WIZARD ───────────────────────────────────────────────────────────────────
-function Wizard({ appData }) {
+function Wizard({ appData, subData }) {
   const { products, multipliers, services: dbServices, cityRulesMap, loading, calcWindowPrice, materialMult, colorMult, glassMult } = appData;
+  const { subscription, plan, plans, consumeQuote, changePlan, pctUsed, quotaColor } = subData;
   const [step, setStep] = useState(1);
   const [postStep, setPostStep] = useState(null);
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "", address: "", zip: "" });
@@ -652,6 +786,8 @@ function Wizard({ appData }) {
   const [downPct, setDownPct] = useState(20);
   const [errors, setErrors] = useState({});
   const [confirmedTotal, setConfirmedTotal] = useState(0);
+  const [showNoQuota, setShowNoQuota] = useState(false);
+  const [consuming, setConsuming] = useState(false);
 
   const validate1 = () => {
     const e = {};
@@ -664,9 +800,19 @@ function Wizard({ appData }) {
     return Object.keys(e).length === 0;
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step === 1 && !validate1()) return;
-    if (step === 2 && windows.length === 0) { alert("Add at least one window."); return; }
+    if (step === 2) {
+      if (windows.length === 0) { alert("Add at least one window."); return; }
+      // ── CONSUME QUOTE HERE ──
+      setConsuming(true);
+      const result = await consumeQuote();
+      setConsuming(false);
+      if (!result.allowed) {
+        setShowNoQuota(true);
+        return;
+      }
+    }
     setStep(s => s + 1);
   };
 
@@ -693,9 +839,16 @@ function Wizard({ appData }) {
 
   return (
     <div className="wizard-shell">
+      {showNoQuota && (
+        <NoQuotaModal
+          plan={plan} plans={plans}
+          onUpgrade={async (planId) => { await changePlan(planId); setShowNoQuota(false); }}
+          onClose={() => setShowNoQuota(false)}
+        />
+      )}
       <div className="top-nav">
         <div className="logo"><div className="logo-icon"><Icon name="window" size={14} /></div> WindowQuote</div>
-        <span style={{ fontSize: 12, color: T.textMuted }}>Step {step} of 5</span>
+        <SubscriptionBadge subscription={subscription} plan={plan} pctUsed={pctUsed} quotaColor={quotaColor} />
       </div>
       <div className="progress-bar"><div className="progress-fill" style={{ width: `${(step / 5) * 100}%` }} /></div>
       <div className="stepper">
@@ -715,8 +868,8 @@ function Wizard({ appData }) {
       {step < 5 && (
         <div className="bottom-bar">
           {step > 1 && <button className="btn btn-secondary" onClick={() => setStep(s => s - 1)}>Back</button>}
-          <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleNext}>
-            {step === 4 ? "Review Quote" : "Continue"} <Icon name="arrow_right" />
+          <button className="btn btn-primary" style={{ flex: 1 }} disabled={consuming} onClick={handleNext}>
+            {consuming ? "Checking quota..." : step === 4 ? "Review Quote" : "Continue"} {!consuming && <Icon name="arrow_right" />}
           </button>
         </div>
       )}
@@ -725,7 +878,7 @@ function Wizard({ appData }) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ appData }) {
+function AdminPanel({ appData, subData }) {
   const { products, multipliers, services, cityRules, loading, refetch, calcWindowPrice } = appData;
   const [tab, setTab] = useState("quotes");
   const [quotes, setQuotes] = useState([]);
@@ -833,6 +986,7 @@ function AdminPanel({ appData }) {
     { id: "multipliers", label: "✖ Multipliers" },
     { id: "services", label: "🔧 Services" },
     { id: "cities", label: "🗺 City Rules" },
+    { id: "subscription", label: "⭐ Subscription" },
   ];
 
   if (loading) return <LoadingScreen />;
@@ -1020,6 +1174,11 @@ function AdminPanel({ appData }) {
         </div>
       )}
 
+      {/* ── SUBSCRIPTION ── */}
+      {tab === "subscription" && (
+        <SubscriptionAdmin subData={subData} />
+      )}
+
       <div style={{ height: 48 }} />
 
       {/* ── MODALS ── */}
@@ -1033,6 +1192,155 @@ function AdminPanel({ appData }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION ADMIN ───────────────────────────────────────────────────────
+function SubscriptionAdmin({ subData }) {
+  const { subscription, plan, plans, loading, changePlan, refetch, pctUsed, quotaColor } = subData;
+  const [saving, setSaving] = useState(false);
+  const [editQuotes, setEditQuotes] = useState(false);
+  const [newUsed, setNewUsed] = useState(0);
+
+  if (loading || !subscription) return <LoadingScreen />;
+
+  const daysLeft = Math.ceil((new Date(subscription.period_end) - new Date()) / (1000 * 60 * 60 * 24));
+  const isExpired = daysLeft < 0;
+  const remaining = plan?.quote_limit === -1 ? '∞' : Math.max(0, plan.quote_limit - subscription.quotes_used);
+  const pct = pctUsed();
+
+  const handleChangePlan = async (planId) => {
+    setSaving(true);
+    await changePlan(planId);
+    setSaving(false);
+  };
+
+  const handleEditQuotes = async () => {
+    await supabase.from('subscriptions').update({ quotes_used: parseInt(newUsed) }).eq('id', subscription.id);
+    await refetch();
+    setEditQuotes(false);
+  };
+
+  return (
+    <div className="fade-up" style={{ maxWidth: 860 }}>
+      {/* Current plan hero */}
+      <div style={{ background: 'linear-gradient(135deg, #1E40AF 0%, #1D4ED8 60%, #2563EB 100%)', borderRadius: 20, padding: 28, color: 'white', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>Current Plan</div>
+            <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: -1 }}>{plan?.name}</div>
+            <div style={{ opacity: 0.8, fontSize: 14, marginTop: 4 }}>${plan?.price_monthly}/month · {plan?.quote_limit === -1 ? 'Unlimited' : plan?.quote_limit} quotes</div>
+          </div>
+          <span style={{ background: isExpired ? 'rgba(239,68,68,0.3)' : 'rgba(52,211,153,0.25)', color: isExpired ? '#FCA5A5' : '#34D399', padding: '6px 14px', borderRadius: 100, fontSize: 12, fontWeight: 700 }}>
+            {isExpired ? '⚠ Expired' : '● Active'}
+          </span>
+        </div>
+        {/* Stats */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+          {[
+            { label: 'Quote Limit', value: plan?.quote_limit === -1 ? '∞' : plan?.quote_limit },
+            { label: 'Used', value: subscription.quotes_used },
+            { label: 'Remaining', value: remaining },
+          ].map(s => (
+            <div key={s.label} style={{ background: 'rgba(255,255,255,0.12)', borderRadius: 12, padding: '14px 16px' }}>
+              <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 26, fontWeight: 800, fontFamily: 'DM Mono' }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+        {/* Quota bar */}
+        {plan?.quote_limit !== -1 && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, opacity: 0.8, marginBottom: 6 }}>
+              <span>Usage this period</span><span>{pct}%</span>
+            </div>
+            <div style={{ height: 8, background: 'rgba(255,255,255,0.15)', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: pct >= 90 ? '#F87171' : pct >= 70 ? '#FBBF24' : '#34D399', borderRadius: 4, transition: 'width 0.6s ease' }} />
+            </div>
+          </>
+        )}
+        <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7 }}>
+          Period: {new Date(subscription.period_start).toLocaleDateString()} – {new Date(subscription.period_end).toLocaleDateString()} ·
+          {isExpired ? ' Period expired' : ` ${daysLeft} days remaining`}
+        </div>
+      </div>
+
+      {/* Quick actions */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+        <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => { setNewUsed(subscription.quotes_used); setEditQuotes(true); }}>
+          ✏️ Edit Quote Count
+        </button>
+        <button className="btn btn-secondary" style={{ flex: 1 }} onClick={async () => {
+          const newEnd = new Date(); newEnd.setMonth(newEnd.getMonth() + 1);
+          const newStart = new Date();
+          await supabase.from('subscriptions').update({ quotes_used: 0, period_start: newStart.toISOString().split('T')[0], period_end: newEnd.toISOString().split('T')[0] }).eq('id', subscription.id);
+          await refetch();
+        }}>
+          🔄 Reset Period
+        </button>
+      </div>
+
+      {/* Edit quotes modal */}
+      {editQuotes && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 16 }}>Edit Quote Count</div>
+            <div className="field">
+              <label className="label">Quotes Used</label>
+              <input className="input" type="number" value={newUsed} min={0} onChange={e => setNewUsed(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setEditQuotes(false)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleEditQuotes}><Icon name="save" /> Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Plan selector */}
+      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>Available Plans</div>
+      <div className="plan-grid">
+        {plans.map(p => (
+          <div key={p.id} className={`plan-card ${p.id === subscription.plan_id ? 'current' : ''} ${p.name === 'Silver' ? 'popular' : ''}`}
+            onClick={() => p.id !== subscription.plan_id && handleChangePlan(p.id)}>
+            {p.id === subscription.plan_id && (
+              <span className="badge badge-blue" style={{ marginBottom: 8, display: 'inline-flex' }}>Current Plan</span>
+            )}
+            <div className="plan-name">{p.name}</div>
+            <div className="plan-price">${p.price_monthly}<span>/mo</span></div>
+            <div style={{ fontSize: 13, color: T.textMuted, margin: '8px 0' }}>
+              {p.quote_limit === -1 ? '♾ Unlimited' : `${p.quote_limit} quotes/mo`}
+            </div>
+            <div style={{ fontSize: 12, color: T.textMuted }}>
+              Overage: {p.overage_price === 0 ? 'N/A' : `$${p.overage_price}/quote`}
+            </div>
+            {p.id !== subscription.plan_id && (
+              <button className="btn btn-accent btn-sm btn-full" style={{ marginTop: 12 }} disabled={saving}>
+                {saving ? "..." : "Switch Plan"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Billing details */}
+      <div className="card">
+        <div style={{ fontWeight: 700, marginBottom: 16 }}>Billing Details</div>
+        {[
+          { label: "Company", value: subscription.company_name },
+          { label: "Email", value: subscription.email },
+          { label: "Overage Rate", value: plan?.overage_price === 0 ? 'Not applicable' : `$${plan?.overage_price} per extra quote` },
+          { label: "Period Start", value: new Date(subscription.period_start).toLocaleDateString() },
+          { label: "Period End", value: new Date(subscription.period_end).toLocaleDateString() },
+          { label: "Status", value: subscription.status },
+        ].map(r => (
+          <div key={r.label} className="price-row">
+            <span className="muted">{r.label}</span>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>{r.value}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1134,6 +1442,7 @@ function CityModal({ data, onSave, onClose, saving }) {
 export default function App() {
   const [view, setView] = useState("wizard");
   const appData = useAppData();
+  const subData = useSubscription();
 
   return (
     <>
@@ -1146,7 +1455,7 @@ export default function App() {
           </button>
         ))}
       </div>
-      {view === "wizard" ? <Wizard appData={appData} /> : <AdminPanel appData={appData} />}
+      {view === "wizard" ? <Wizard appData={appData} subData={subData} /> : <AdminPanel appData={appData} subData={subData} />}
     </>
   );
 }
