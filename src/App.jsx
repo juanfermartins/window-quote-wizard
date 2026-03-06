@@ -109,7 +109,13 @@ const css = `
   .fade-up { animation: fadeUp 0.3s ease forwards; }
   .sig-pad { border: 2px dashed ${T.border}; border-radius: 12px; background: ${T.surfaceAlt}; height: 120px; display: flex; align-items: center; justify-content: center; color: ${T.textLight}; font-size: 13px; cursor: crosshair; position: relative; overflow: hidden; }
   .info-box { background: ${T.accentLight}; border: 1px solid #BFDBFE; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: ${T.accent}; margin-bottom: 16px; display: flex; gap: 8px; align-items: flex-start; }
-  .sub-card { background: linear-gradient(135deg, #1A1A1A 0%, #2D2D2D 100%); border-radius: 16px; padding: 24px; color: white; margin-bottom: 20px; }
+  .login-shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: ${T.bg}; padding: 20px; }
+  .login-card { background: white; border-radius: 20px; padding: 40px 36px; width: 100%; max-width: 400px; box-shadow: 0 8px 40px rgba(0,0,0,0.08); border: 1.5px solid ${T.border}; }
+  .login-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+  .login-logo-icon { width: 40px; height: 40px; background: ${T.text}; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px; }
+  .avatar { width: 32px; height: 32px; background: ${T.accent}; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+  .quote-detail-row { cursor: pointer; }
+  .quote-detail-row:hover td { background: ${T.accentLight} !important; }
   .usage-bar { height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; margin-top: 8px; }
   .usage-fill { height: 100%; background: linear-gradient(90deg, #60A5FA, #34D399); border-radius: 4px; transition: width 0.6s ease; }
   .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
@@ -192,6 +198,190 @@ function LoadingScreen() {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: 16 }}>
       <div className="spinner" style={{ width: 32, height: 32 }} />
       <div style={{ fontSize: 14, color: T.textMuted }}>Loading your data...</div>
+    </div>
+  );
+}
+
+// ─── AUTH HOOK ────────────────────────────────────────────────────────────────
+function useAuth() {
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("wizard");
+
+  const fetchProfile = async (userId) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (data) setProfile(data);
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (session?.user) fetchProfile(session.user.id);
+      setLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) fetchProfile(session.user.id);
+      else setProfile(null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signIn = async (email, password) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return error;
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null); setProfile(null);
+  };
+
+  return { user, profile, loading, signIn, signOut, isAdmin: profile?.role === 'admin', view, setView };
+}
+
+// ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    if (!email || !password) { setError('Please enter email and password.'); return; }
+    setLoading(true); setError('');
+    const err = await onLogin(email, password);
+    if (err) setError('Invalid email or password. Please try again.');
+    setLoading(false);
+  };
+
+  return (
+    <div className="login-shell">
+      <div className="login-card">
+        <div className="login-logo">
+          <div className="login-logo-icon"><Icon name="window" size={20} /></div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: -0.3 }}>WindowQuote</div>
+            <div style={{ fontSize: 12, color: T.textMuted }}>Professional quoting platform</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: -0.5, marginBottom: 4 }}>Welcome back</div>
+          <div style={{ fontSize: 13, color: T.textMuted }}>Sign in to access your account</div>
+        </div>
+
+        {error && (
+          <div style={{ background: T.dangerLight, border: `1px solid #FCA5A5`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: T.danger, marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
+
+        <div className="field">
+          <label className="label">Email</label>
+          <input className="input" type="email" placeholder="you@company.com" value={email}
+            onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} />
+        </div>
+        <div className="field">
+          <label className="label">Password</label>
+          <input className="input" type="password" placeholder="••••••••" value={password}
+            onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSubmit()} />
+        </div>
+
+        <button className="btn btn-primary btn-full" style={{ marginTop: 8 }} disabled={loading} onClick={handleSubmit}>
+          {loading ? 'Signing in...' : 'Sign In'} {!loading && <Icon name="arrow_right" />}
+        </button>
+
+        <div style={{ textAlign: 'center', marginTop: 20, fontSize: 12, color: T.textLight }}>
+          Need access? Contact your administrator.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── QUOTE DETAIL MODAL ───────────────────────────────────────────────────────
+function QuoteDetailModal({ quote, onClose, onStatusChange }) {
+  if (!quote) return null;
+  const windows = quote.windows || [];
+  const services = quote.services || [];
+  const fmt = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n || 0);
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 560 }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>{quote.customer_name}</div>
+            <div style={{ fontSize: 13, color: T.textMuted }}>{quote.customer_email} · {quote.customer_phone}</div>
+            <div style={{ fontSize: 13, color: T.textMuted, marginTop: 2 }}>{quote.address}, {quote.zip}</div>
+          </div>
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textMuted, padding: 4 }} onClick={onClose}>
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+
+        {/* Meta */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <StatusBadge status={quote.status} />
+          <span className="badge badge-gray">{new Date(quote.created_at).toLocaleDateString()}</span>
+          {quote.created_by_name && <span className="badge badge-blue">👤 {quote.created_by_name}</span>}
+        </div>
+
+        {/* Windows */}
+        {windows.length > 0 && (
+          <div className="card-sm" style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', color: T.textMuted, marginBottom: 10 }}>
+              Windows ({windows.length} types)
+            </div>
+            {windows.map((w, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0', borderBottom: i < windows.length - 1 ? `1px solid ${T.border}` : 'none' }}>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{w.qty}× {w.type}</span>
+                  <span style={{ color: T.textMuted }}> · {w.material} · {w.color} · {w.glass}</span>
+                </div>
+                <span style={{ fontFamily: 'DM Mono', fontWeight: 600 }}>{w.width}"×{w.height}"</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Services */}
+        {services.length > 0 && (
+          <div className="card-sm" style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', color: T.textMuted, marginBottom: 10 }}>Services</div>
+            {services.map((s, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                <span>{s.label}</span>
+                <span style={{ fontFamily: 'DM Mono' }}>{fmt(s.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Total */}
+        <div className="card-sm" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 700 }}>Total</div>
+            <div style={{ fontSize: 12, color: T.textMuted }}>Down payment: {quote.down_pct}%</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontWeight: 800, fontSize: 22, fontFamily: 'DM Mono' }}>{fmt(quote.total)}</div>
+            <div style={{ fontSize: 12, color: T.textMuted }}>Down: {fmt(Math.round((quote.total || 0) * (quote.down_pct || 20) / 100))}</div>
+          </div>
+        </div>
+
+        {/* Status change */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: T.textMuted, whiteSpace: 'nowrap' }}>Change status:</span>
+          <select className="select" style={{ fontSize: 13 }} value={quote.status}
+            onChange={e => onStatusChange(quote.id, e.target.value)}>
+            {['draft','finalized','signed','paid'].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          </select>
+        </div>
+      </div>
     </div>
   );
 }
@@ -602,7 +792,7 @@ function Step4({ windows, selectedServices, dbServices, zip, cityRulesMap, downP
 }
 
 // ─── STEP 5 ───────────────────────────────────────────────────────────────────
-function Step5({ customer, windows, selectedServices, dbServices, zip, cityRulesMap, downPct, calcWindowPrice, onConfirm }) {
+function Step5({ customer, windows, selectedServices, dbServices, zip, cityRulesMap, downPct, calcWindowPrice, onConfirm, currentUser }) {
   const [agreed, setAgreed] = useState(false);
   const [saving, setSaving] = useState(false);
   const rules = cityRulesMap[zip] || null;
@@ -630,6 +820,8 @@ function Step5({ customer, windows, selectedServices, dbServices, zip, cityRules
       down_pct: downPct,
       total: total,
       status: 'finalized',
+      created_by: currentUser?.id || null,
+      created_by_name: currentUser?.profile?.full_name || currentUser?.email || 'Unknown',
     });
     setSaving(false);
     if (!error) onConfirm(total);
@@ -775,7 +967,8 @@ function PayDeposit({ downAmt }) {
 }
 
 // ─── WIZARD ───────────────────────────────────────────────────────────────────
-function Wizard({ appData, subData }) {
+function Wizard({ appData, subData, auth }) {
+  const { user, profile, signOut, isAdmin } = auth;
   const { products, multipliers, services: dbServices, cityRulesMap, loading, calcWindowPrice, materialMult, colorMult, glassMult } = appData;
   const { subscription, plan, plans, consumeQuote, changePlan, pctUsed, quotaColor } = subData;
   const [step, setStep] = useState(1);
@@ -848,7 +1041,13 @@ function Wizard({ appData, subData }) {
       )}
       <div className="top-nav">
         <div className="logo"><div className="logo-icon"><Icon name="window" size={14} /></div> WindowQuote</div>
-        <SubscriptionBadge subscription={subscription} plan={plan} pctUsed={pctUsed} quotaColor={quotaColor} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SubscriptionBadge subscription={subscription} plan={plan} pctUsed={pctUsed} quotaColor={quotaColor} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="avatar">{(profile?.full_name || user?.email || 'U').charAt(0).toUpperCase()}</div>
+            <button style={{ background: 'none', border: 'none', fontSize: 12, color: T.textMuted, cursor: 'pointer' }} onClick={signOut}>Sign out</button>
+          </div>
+        </div>
       </div>
       <div className="progress-bar"><div className="progress-fill" style={{ width: `${(step / 5) * 100}%` }} /></div>
       <div className="stepper">
@@ -864,6 +1063,7 @@ function Wizard({ appData, subData }) {
       {step === 3 && <Step3 selectedServices={selectedServices} setSelectedServices={setSelectedServices} zip={customer.zip} dbServices={dbServices} cityRulesMap={cityRulesMap} />}
       {step === 4 && <Step4 windows={windows} selectedServices={selectedServices} dbServices={dbServices} zip={customer.zip} cityRulesMap={cityRulesMap} downPct={downPct} setDownPct={setDownPct} calcWindowPrice={calcWindowPrice} />}
       {step === 5 && <Step5 customer={customer} windows={windows} selectedServices={selectedServices} dbServices={dbServices} zip={customer.zip} cityRulesMap={cityRulesMap} downPct={downPct} calcWindowPrice={calcWindowPrice}
+        currentUser={{ id: user?.id, email: user?.email, profile }}
         onConfirm={(total) => { setConfirmedTotal(total); setPostStep("contract"); }} />}
       {step < 5 && (
         <div className="bottom-bar">
@@ -878,7 +1078,7 @@ function Wizard({ appData, subData }) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({ appData, subData }) {
+function AdminPanel({ appData, subData, auth }) {
   const { products, multipliers, services, cityRules, loading, refetch, calcWindowPrice } = appData;
   const [tab, setTab] = useState("quotes");
   const [quotes, setQuotes] = useState([]);
@@ -894,6 +1094,8 @@ function AdminPanel({ appData, subData }) {
   useEffect(() => {
     if (tab === "quotes") fetchQuotes();
   }, [tab]);
+
+  const [selectedQuote, setSelectedQuote] = useState(null);
 
   const fetchQuotes = async () => {
     setQuotesLoading(true);
@@ -1002,7 +1204,17 @@ function AdminPanel({ appData, subData }) {
           </div>
           <div style={{ fontSize: 13, color: T.textMuted }}>Manage your quoting system</div>
         </div>
-        <span className="badge badge-green">● Live</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="badge badge-green">● Live</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="avatar">{(auth.profile?.full_name || auth.user?.email || 'A').charAt(0).toUpperCase()}</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{auth.profile?.full_name || 'Admin'}</div>
+              <div style={{ fontSize: 11, color: T.textMuted }}>{auth.user?.email}</div>
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={auth.signOut}>Sign out</button>
+        </div>
       </div>
 
       <div className="admin-nav">
@@ -1028,33 +1240,46 @@ function AdminPanel({ appData, subData }) {
             <div className="table-wrap">
               <table>
                 <thead><tr>
-                  <th>Customer</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th>
+                  <th>Customer</th><th>Quoted by</th><th>Date</th><th>Windows</th><th>Total</th><th>Status</th>
                 </tr></thead>
                 <tbody>
                   {filteredQuotes.length === 0 ? (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No quotes yet</td></tr>
+                    <tr><td colSpan={6} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No quotes yet</td></tr>
                   ) : filteredQuotes.map(q => (
-                    <tr key={q.id}>
+                    <tr key={q.id} className="quote-detail-row" onClick={() => setSelectedQuote(q)}>
                       <td>
                         <div style={{ fontWeight: 600 }}>{q.customer_name}</div>
                         <div style={{ fontSize: 11, color: T.textMuted }}>{q.customer_email}</div>
                       </td>
-                      <td style={{ color: T.textMuted }}>{new Date(q.created_at).toLocaleDateString()}</td>
-                      <td><span className="mono" style={{ fontWeight: 700 }}>{fmt(q.total || 0)}</span></td>
-                      <td><StatusBadge status={q.status} /></td>
                       <td>
-                        <select className="select" style={{ fontSize: 12, padding: '5px 28px 5px 8px', width: 'auto' }}
-                          value={q.status} onChange={e => updateQuoteStatus(q.id, e.target.value)}>
-                          {['draft','finalized','signed','paid'].map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>
+                            {(q.created_by_name || 'U').charAt(0).toUpperCase()}
+                          </div>
+                          <span style={{ fontSize: 13 }}>{q.created_by_name || 'Unknown'}</span>
+                        </div>
                       </td>
+                      <td style={{ color: T.textMuted }}>{new Date(q.created_at).toLocaleDateString()}</td>
+                      <td style={{ color: T.textMuted }}>{(q.windows || []).reduce((s, w) => s + (w.qty || 1), 0)}</td>
+                      <td><span className="mono" style={{ fontWeight: 700 }}>{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(q.total || 0)}</span></td>
+                      <td><StatusBadge status={q.status} /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-          <div style={{ marginTop: 12, fontSize: 12, color: T.textMuted }}>{filteredQuotes.length} quotes</div>
+          <div style={{ marginTop: 12, fontSize: 12, color: T.textMuted }}>{filteredQuotes.length} quotes · <span style={{ color: T.accent }}>Click any row to see full details</span></div>
+          {selectedQuote && (
+            <QuoteDetailModal
+              quote={selectedQuote}
+              onClose={() => setSelectedQuote(null)}
+              onStatusChange={async (id, status) => {
+                await updateQuoteStatus(id, status);
+                setSelectedQuote(q => ({ ...q, status }));
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -1440,22 +1665,40 @@ function CityModal({ data, onSave, onClose, saving }) {
 
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [view, setView] = useState("wizard");
+  const auth = useAuth();
   const appData = useAppData();
   const subData = useSubscription();
 
+  // Show loading while checking auth
+  if (auth.loading) return <LoadingScreen />;
+
+  // Not logged in → show login
+  if (!auth.user) return <LoginScreen onLogin={auth.signIn} />;
+
+  // Logged in → show correct view based on role
   return (
     <>
       <style>{css}</style>
-      <div style={{ position: 'fixed', top: 12, right: 16, display: 'flex', background: '#fff', border: `1.5px solid ${T.border}`, borderRadius: 10, padding: 4, gap: 4, zIndex: 999, boxShadow: '0 2px 10px rgba(0,0,0,0.08)' }}>
-        {[{ id: "wizard", label: "📱 Wizard" }, { id: "admin", label: "🖥 Admin" }].map(v => (
-          <button key={v.id} onClick={() => setView(v.id)}
-            style={{ padding: '6px 12px', borderRadius: 7, border: 'none', fontFamily: 'DM Sans', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s', background: view === v.id ? T.text : 'transparent', color: view === v.id ? 'white' : T.textMuted }}>
-            {v.label}
-          </button>
-        ))}
-      </div>
-      {view === "wizard" ? <Wizard appData={appData} subData={subData} /> : <AdminPanel appData={appData} subData={subData} />}
+
+      {/* Only admins see the toggle */}
+      {auth.isAdmin && (
+        <div style={{ position: 'fixed', top: 12, right: 16, display: 'flex', background: '#fff', border: `1.5px solid ${T.border}`, borderRadius: 10, padding: 4, gap: 4, zIndex: 999, boxShadow: '0 2px 10px rgba(0,0,0,0.08)' }}>
+          {[{ id: "wizard", label: "📱 Wizard" }, { id: "admin", label: "🖥 Admin" }].map(v => (
+            <button key={v.id} onClick={() => auth.setView(v.id)}
+              style={{ padding: '6px 12px', borderRadius: 7, border: 'none', fontFamily: 'DM Sans', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s', background: auth.view === v.id ? T.text : 'transparent', color: auth.view === v.id ? 'white' : T.textMuted }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Contractors only see the Wizard */}
+      {!auth.isAdmin
+        ? <Wizard appData={appData} subData={subData} auth={auth} />
+        : auth.view === "wizard"
+          ? <Wizard appData={appData} subData={subData} auth={auth} />
+          : <AdminPanel appData={appData} subData={subData} auth={auth} />
+      }
     </>
   );
 }
