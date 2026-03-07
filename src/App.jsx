@@ -935,7 +935,7 @@ function SuperAdminPanel({ appData, auth }) {
       )}
 
       <div className="admin-nav">
-        {[{id:"companies",label:"🏢 Companies"},{id:"contractors",label:"👥 Contractors"},{id:"quotes",label:"📋 Quotes"},{id:"products",label:"🪟 Products"},{id:"cities",label:"🗺 Cities"}].map(t=>(
+        {[{id:"companies",label:"🏢 Companies"},{id:"contractors",label:"👥 Contractors"},{id:"quotes",label:"📋 Quotes"},{id:"billing",label:"💰 Billing"},{id:"products",label:"🪟 Products"},{id:"cities",label:"🗺 Cities"}].map(t=>(
           <button key={t.id} className={`admin-nav-item ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id)}>{t.label}</button>
         ))}
       </div>
@@ -1055,6 +1055,9 @@ function SuperAdminPanel({ appData, auth }) {
         </div>
       )}
 
+      {/* BILLING — Super Admin sees ALL transactions */}
+      {tab==="billing"&&<SuperBillingPanel companyFilter={selCompany}/>}
+
       {/* PRODUCTS */}
       {tab==="products"&&<ProductsAdmin appData={appData} showToast={showToast} companies={companies}/>}
 
@@ -1074,142 +1077,610 @@ function SuperAdminPanel({ appData, auth }) {
   );
 }
 
+// ─── ADD QUOTES MODAL ─────────────────────────────────────────────────────────
+function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, onSuccess }) {
+  const [mode, setMode] = useState('pack');         // 'pack' | 'upgrade'
+  const [packs, setPacks] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [selectedPack, setSelectedPack] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [processing, setProcessing] = useState(false);
+  const [step, setStep] = useState('choose');       // 'choose' | 'confirm' | 'done'
+
+  const sub = contractor.subscriptions?.[0];
+  const currentPlan = sub?.plans;
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from('quote_packs').select('*').eq('active', true).order('quotes'),
+      supabase.from('plans').select('*').eq('active', true).order('price_monthly'),
+    ]).then(([pk, pl]) => {
+      if (pk.data) { setPacks(pk.data); setSelectedPack(pk.data[1] || pk.data[0]); }
+      if (pl.data) {
+        // Only show plans higher than current
+        const higher = pl.data.filter(p => (p.price_monthly > (currentPlan?.price_monthly || 0)));
+        setPlans(higher);
+        if (higher.length > 0) setSelectedPlan(higher[0]);
+      }
+    });
+  }, []);
+
+  const currentUsed = sub?.quotes_used || 0;
+  const currentLimit = currentPlan?.quote_limit || 0;
+  const remaining = currentLimit === -1 ? '∞' : Math.max(0, currentLimit - currentUsed);
+
+  const handleConfirm = async () => {
+    setProcessing(true);
+    try {
+      if (mode === 'pack' && selectedPack) {
+        // Add quotes: increase the subscription limit by pack amount
+        const newLimit = currentLimit === -1 ? -1 : currentLimit + selectedPack.quotes;
+        await supabase.from('subscriptions').update({ quote_limit_override: newLimit }).eq('id', sub.id);
+        // If no override column, just bump quotes_used down (subtract from used)
+        // Safer: add an extra_quotes field or reduce quotes_used
+        const newUsed = Math.max(0, currentUsed - selectedPack.quotes);
+        await supabase.from('subscriptions').update({ quotes_used: newUsed }).eq('id', sub.id);
+
+        // Log billing transaction
+        await supabase.from('billing_transactions').insert({
+          company_id: companyId,
+          company_name: companyName,
+          contractor_id: contractor.id,
+          contractor_name: contractor.full_name,
+          type: 'quote_pack',
+          description: `${selectedPack.name} — ${selectedPack.quotes} quotes added for ${contractor.full_name}`,
+          amount: selectedPack.price,
+          quotes_added: selectedPack.quotes,
+          status: 'paid',        // mock: instantly "paid"
+          payment_method: 'mock',
+          paid_at: new Date().toISOString(),
+          created_by: adminId,
+        });
+
+      } else if (mode === 'upgrade' && selectedPlan) {
+        // Upgrade plan
+        await supabase.from('subscriptions').update({
+          plan_id: selectedPlan.id,
+          quotes_used: 0,         // reset counter on upgrade
+          period_start: new Date().toISOString().split('T')[0],
+          period_end: new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0],
+        }).eq('id', sub.id);
+
+        const upgradeCost = selectedPlan.price_monthly - (currentPlan?.price_monthly || 0);
+        await supabase.from('billing_transactions').insert({
+          company_id: companyId,
+          company_name: companyName,
+          contractor_id: contractor.id,
+          contractor_name: contractor.full_name,
+          type: 'plan_upgrade',
+          description: `Upgrade ${currentPlan?.name || 'No Plan'} → ${selectedPlan.name} for ${contractor.full_name}`,
+          amount: Math.max(0, upgradeCost),
+          quotes_added: selectedPlan.quote_limit === -1 ? 9999 : selectedPlan.quote_limit,
+          old_plan_id: currentPlan?.id || null,
+          new_plan_id: selectedPlan.id,
+          status: 'paid',
+          payment_method: 'mock',
+          paid_at: new Date().toISOString(),
+          created_by: adminId,
+        });
+      }
+      setStep('done');
+    } catch (e) {
+      console.error(e);
+    }
+    setProcessing(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 500 }}>
+
+        {/* DONE STATE */}
+        {step === 'done' && (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <div style={{ fontSize: 52, marginBottom: 16 }}>✅</div>
+            <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 8 }}>
+              {mode === 'pack' ? `${selectedPack?.quotes} Quotes Added!` : `Plan Upgraded!`}
+            </div>
+            <div style={{ fontSize: 14, color: T.textMuted, marginBottom: 8 }}>
+              {contractor.full_name} can now create more quotes.
+            </div>
+            <div style={{ background: T.warningLight, border: `1px solid #FDE68A`, borderRadius: 10, padding: '10px 14px', fontSize: 12, color: T.warning, marginBottom: 20 }}>
+              💳 <strong>Mock payment</strong> — ${mode === 'pack' ? selectedPack?.price : Math.max(0, (selectedPlan?.price_monthly||0)-(currentPlan?.price_monthly||0))} recorded. Connect Stripe to charge real cards.
+            </div>
+            <button className="btn btn-primary btn-full" onClick={() => { onSuccess(); onClose(); }}>Done</button>
+          </div>
+        )}
+
+        {/* CHOOSE STATE */}
+        {step === 'choose' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 17 }}>Add Quotes for</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <div className="avatar" style={{ background: T.accent, width: 28, height: 28, fontSize: 11 }}>{(contractor.full_name||'U').charAt(0).toUpperCase()}</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{contractor.full_name}</div>
+                    <div style={{ fontSize: 12, color: T.textMuted }}>
+                      {currentPlan?.name || 'No plan'} · {remaining} quotes left
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textMuted }} onClick={onClose}><Icon name="x" size={18} /></button>
+            </div>
+
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, padding: 4, background: T.surfaceAlt, borderRadius: 10 }}>
+              {[{id:'pack',label:'🎁 Buy Quote Pack'},{id:'upgrade',label:'⬆️ Upgrade Plan'}].map(m => (
+                <button key={m.id} onClick={() => setMode(m.id)}
+                  style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+                    background: mode === m.id ? T.surface : 'transparent',
+                    color: mode === m.id ? T.text : T.textMuted,
+                    boxShadow: mode === m.id ? '0 1px 4px rgba(0,0,0,0.08)' : 'none' }}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {/* PACK MODE */}
+            {mode === 'pack' && (
+              <>
+                <div style={{ fontWeight: 600, fontSize: 13, color: T.textMuted, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Choose a Pack</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+                  {packs.map(pk => (
+                    <div key={pk.id} onClick={() => setSelectedPack(pk)}
+                      style={{ border: `2px solid ${selectedPack?.id === pk.id ? T.accent : T.border}`, borderRadius: 12, padding: '14px 12px', cursor: 'pointer', background: selectedPack?.id === pk.id ? T.accentLight : T.surface, transition: 'all 0.15s' }}>
+                      <div style={{ fontWeight: 800, fontSize: 22, fontFamily: 'DM Mono', color: selectedPack?.id === pk.id ? T.accent : T.text }}>{pk.quotes}</div>
+                      <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8 }}>quotes</div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{fmt(pk.price)}</div>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>{fmt(pk.price / pk.quotes)}/quote</div>
+                      {selectedPack?.id === pk.id && <div style={{ fontSize: 10, color: T.accent, marginTop: 6, fontWeight: 700 }}>✓ SELECTED</div>}
+                    </div>
+                  ))}
+                </div>
+                {selectedPack && (
+                  <div style={{ background: T.successLight, border: `1px solid #BBF7D0`, borderRadius: 10, padding: '12px 14px', fontSize: 13, marginBottom: 16 }}>
+                    Adding <strong>{selectedPack.quotes} quotes</strong> to {contractor.full_name?.split(' ')[0]}'s account will reset their counter and give them <strong>{(remaining === '∞' ? '∞' : Number(remaining) + selectedPack.quotes)} total remaining</strong>.
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* UPGRADE MODE */}
+            {mode === 'upgrade' && (
+              <>
+                <div style={{ fontWeight: 600, fontSize: 13, color: T.textMuted, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Upgrade To</div>
+                {plans.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 32, color: T.textMuted, fontSize: 13 }}>
+                    {currentPlan?.quote_limit === -1 ? '✓ Already on the highest plan (Enterprise)' : 'No higher plans available.'}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+                    {plans.map(pl => {
+                      const diff = (pl.price_monthly - (currentPlan?.price_monthly || 0));
+                      return (
+                        <div key={pl.id} onClick={() => setSelectedPlan(pl)}
+                          style={{ border: `2px solid ${selectedPlan?.id === pl.id ? T.accent : T.border}`, borderRadius: 12, padding: '14px 16px', cursor: 'pointer', background: selectedPlan?.id === pl.id ? T.accentLight : T.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'all 0.15s' }}>
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{pl.name}</div>
+                            <div style={{ fontSize: 12, color: T.textMuted }}>{pl.quote_limit === -1 ? 'Unlimited' : pl.quote_limit} quotes/month</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 800, fontFamily: 'DM Mono' }}>{fmt(pl.price_monthly)}/mo</div>
+                            <div style={{ fontSize: 11, color: T.success }}>+{fmt(diff)} upgrade</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {selectedPlan && plans.length > 0 && (
+                  <div style={{ background: T.accentLight, border: `1px solid #BFDBFE`, borderRadius: 10, padding: '12px 14px', fontSize: 13, marginBottom: 16 }}>
+                    <strong>Plan resets immediately.</strong> {contractor.full_name?.split(' ')[0]}'s counter resets to 0 and they get <strong>{selectedPlan.quote_limit === -1 ? 'unlimited' : selectedPlan.quote_limit} quotes</strong> starting today.
+                  </div>
+                )}
+              </>
+            )}
+
+            <button className="btn btn-primary btn-full"
+              disabled={processing || (mode === 'pack' && !selectedPack) || (mode === 'upgrade' && (!selectedPlan || plans.length === 0))}
+              onClick={() => setStep('confirm')}>
+              Review & Confirm →
+            </button>
+          </>
+        )}
+
+        {/* CONFIRM STATE */}
+        {step === 'confirm' && (
+          <>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 20 }}>Confirm Purchase</div>
+            <div style={{ background: T.surfaceAlt, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ color: T.textMuted }}>Contractor</span>
+                <span style={{ fontWeight: 600 }}>{contractor.full_name}</span>
+              </div>
+              {mode === 'pack' ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ color: T.textMuted }}>Pack</span>
+                    <span style={{ fontWeight: 600 }}>{selectedPack?.name} ({selectedPack?.quotes} quotes)</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
+                    <span style={{ fontWeight: 700 }}>Total</span>
+                    <span style={{ fontWeight: 800, fontFamily: 'DM Mono', fontSize: 18 }}>{fmt(selectedPack?.price)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ color: T.textMuted }}>From</span>
+                    <span style={{ fontWeight: 600 }}>{currentPlan?.name || 'No plan'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <span style={{ color: T.textMuted }}>To</span>
+                    <span style={{ fontWeight: 600 }}>{selectedPlan?.name}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
+                    <span style={{ fontWeight: 700 }}>Total</span>
+                    <span style={{ fontWeight: 800, fontFamily: 'DM Mono', fontSize: 18 }}>{fmt(selectedPlan?.price_monthly)}/mo</span>
+                  </div>
+                </>
+              )}
+            </div>
+            <div style={{ background: T.warningLight, border: `1px solid #FDE68A`, borderRadius: 10, padding: '10px 14px', fontSize: 12, color: T.warning, marginBottom: 16 }}>
+              💳 <strong>Mock mode</strong> — no real charge. This transaction will be recorded for when Stripe is connected.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setStep('choose')}>Back</button>
+              <button className="btn btn-accent" style={{ flex: 2 }} disabled={processing} onClick={handleConfirm}>
+                {processing ? 'Processing...' : `Confirm ${mode === 'pack' ? fmt(selectedPack?.price) : fmt(selectedPlan?.price_monthly)+'/mo'}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── COMPANY ADMIN PANEL ──────────────────────────────────────────────────────
 function CompanyAdminPanel({ appData, auth }) {
-  const [tab,setTab]=useState("team");
-  const [contractors,setContractors]=useState([]);
-  const [quotes,setQuotes]=useState([]);
-  const [selQuote,setSelQuote]=useState(null);
-  const [toast,setToast]=useState(null);
-  const [loading,setLoading]=useState(true);
+  const [tab, setTab] = useState("team");
+  const [contractors, setContractors] = useState([]);
+  const [quotes, setQuotes] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [selQuote, setSelQuote] = useState(null);
+  const [addQuotesFor, setAddQuotesFor] = useState(null); // contractor object
+  const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(()=>{fetchAll();},[]);
+  useEffect(() => { fetchAll(); }, []);
 
-  const fetchAll=async()=>{
+  const fetchAll = async () => {
     setLoading(true);
-    const [us,qu]=await Promise.all([
-      supabase.from('profiles').select('*,subscriptions(*,plans(*))').eq('company_id',auth.companyId).eq('role','contractor'),
-      supabase.from('quotes').select('*').eq('company_id',auth.companyId).order('created_at',{ascending:false}),
+    const [us, qu, tx] = await Promise.all([
+      supabase.from('profiles').select('*, subscriptions(*, plans(*))').eq('company_id', auth.companyId).eq('role', 'contractor'),
+      supabase.from('quotes').select('*').eq('company_id', auth.companyId).order('created_at', { ascending: false }),
+      supabase.from('billing_transactions').select('*').eq('company_id', auth.companyId).order('created_at', { ascending: false }),
     ]);
-    if(us.data)setContractors(us.data);
-    if(qu.data)setQuotes(qu.data);
+    if (us.data) setContractors(us.data);
+    if (qu.data) setQuotes(qu.data);
+    if (tx.data) setTransactions(tx.data);
     setLoading(false);
   };
 
-  const updateStatus=async(id,status)=>{
-    await supabase.from('quotes').update({status}).eq('id',id);
-    setQuotes(q=>q.map(x=>x.id===id?{...x,status}:x));
-    setToast({message:"Status updated ✓",type:"success"});
+  const updateStatus = async (id, status) => {
+    await supabase.from('quotes').update({ status }).eq('id', id);
+    setQuotes(q => q.map(x => x.id === id ? { ...x, status } : x));
+    setToast({ message: "Status updated ✓", type: "success" });
   };
 
-  if(loading)return <div className="admin-shell"><LoadingScreen/></div>;
-  const rev=quotes.filter(q=>q.status==='paid').reduce((s,q)=>s+(q.total||0),0);
+  if (loading) return <div className="admin-shell"><LoadingScreen /></div>;
 
-  return(
+  const rev = quotes.filter(q => q.status === 'paid').reduce((s, q) => s + (q.total || 0), 0);
+  const billingTotal = transactions.reduce((s, t) => s + (t.amount || 0), 0);
+
+  return (
     <div className="admin-shell">
-      {toast&&<Toast message={toast.message} type={toast.type} onClose={()=>setToast(null)}/>}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {addQuotesFor && (
+        <AddQuotesModal
+          contractor={addQuotesFor}
+          companyId={auth.companyId}
+          companyName={auth.company?.name}
+          adminId={auth.user?.id}
+          onClose={() => setAddQuotesFor(null)}
+          onSuccess={() => { fetchAll(); setToast({ message: "Quotes updated ✓", type: "success" }); }}
+        />
+      )}
+
       <div className="admin-header">
         <div>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
-            <div className="company-logo" style={{width:36,height:36,fontSize:16}}>{auth.company?.name?.charAt(0)}</div>
-            <div><div style={{fontWeight:800,fontSize:18}}>{auth.company?.name}</div><RoleBadge role="company_admin"/></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <div className="company-logo" style={{ width: 36, height: 36, fontSize: 16 }}>{auth.company?.name?.charAt(0)}</div>
+            <div><div style={{ fontWeight: 800, fontSize: 18 }}>{auth.company?.name}</div><RoleBadge role="company_admin" /></div>
           </div>
         </div>
-        <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-          {[{label:"Contractors",value:contractors.length},{label:"Quotes",value:quotes.length},{label:"Revenue",value:fmt(rev)}].map(s=>(
-            <div key={s.label} style={{textAlign:'center',padding:'8px 12px',background:T.surfaceAlt,borderRadius:10,border:`1px solid ${T.border}`}}>
-              <div style={{fontWeight:800,fontSize:16,fontFamily:'DM Mono'}}>{s.value}</div>
-              <div style={{fontSize:11,color:T.textMuted}}>{s.label}</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {[
+            { label: "Contractors", value: contractors.length },
+            { label: "Quotes", value: quotes.length },
+            { label: "Revenue", value: fmt(rev) },
+            { label: "Billing", value: fmt(billingTotal), highlight: true },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign: 'center', padding: '8px 12px', background: s.highlight ? T.accentLight : T.surfaceAlt, borderRadius: 10, border: `1px solid ${s.highlight ? '#BFDBFE' : T.border}` }}>
+              <div style={{ fontWeight: 800, fontSize: 16, fontFamily: 'DM Mono', color: s.highlight ? T.accent : T.text }}>{s.value}</div>
+              <div style={{ fontSize: 11, color: T.textMuted }}>{s.label}</div>
             </div>
           ))}
           <button className="btn btn-secondary btn-sm" onClick={auth.signOut}>Sign out</button>
         </div>
       </div>
+
       <div className="admin-nav">
-        {[{id:"team",label:"👥 My Team"},{id:"quotes",label:"📋 Quotes"},{id:"catalog",label:"🪟 My Catalog"}].map(t=>(
-          <button key={t.id} className={`admin-nav-item ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id)}>{t.label}</button>
+        {[{ id: "team", label: "👥 My Team" }, { id: "quotes", label: "📋 Quotes" }, { id: "billing", label: "💳 Billing" }, { id: "catalog", label: "🪟 My Catalog" }].map(t => (
+          <button key={t.id} className={`admin-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
 
-      {tab==="team"&&(
+      {/* TEAM TAB */}
+      {tab === "team" && (
         <div className="fade-up">
-          <h3 style={{fontWeight:700,fontSize:18,marginBottom:20}}>My Team</h3>
+          <h3 style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>My Team</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Contractor</th><th>Plan</th><th>Quotes Used</th><th>Remaining</th><th>Last Activity</th></tr></thead>
+              <thead><tr><th>Contractor</th><th>Plan</th><th>Quotes Used</th><th>Remaining</th><th>Last Activity</th><th>Actions</th></tr></thead>
               <tbody>
-                {contractors.map(u=>{
-                  const s=u.subscriptions?.[0];const p=s?.plans;
-                  const used=s?.quotes_used||0;const limit=p?.quote_limit??null;
-                  const rem=limit===null?'—':limit===-1?'∞':Math.max(0,limit-used);
-                  const pct=limit&&limit!==-1?Math.min(100,Math.round((used/limit)*100)):0;
-                  const col=pct>=90?'danger':pct>=70?'warning':'ok';
-                  const last=quotes.filter(q=>q.created_by===u.id).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
-                  return(
+                {contractors.map(u => {
+                  const s = u.subscriptions?.[0]; const p = s?.plans;
+                  const used = s?.quotes_used || 0; const limit = p?.quote_limit ?? null;
+                  const rem = limit === null ? '—' : limit === -1 ? '∞' : Math.max(0, limit - used);
+                  const pct = limit && limit !== -1 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+                  const col = pct >= 90 ? 'danger' : pct >= 70 ? 'warning' : 'ok';
+                  const last = quotes.filter(q => q.created_by === u.id).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+                  const isLow = rem !== '∞' && rem !== '—' && rem <= 3;
+                  return (
                     <tr key={u.id}>
                       <td>
-                        <div style={{display:'flex',alignItems:'center',gap:8}}>
-                          <div className="avatar" style={{background:T.accent}}>{(u.full_name||'U').charAt(0).toUpperCase()}</div>
-                          <div style={{fontWeight:600}}>{u.full_name||'No name'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div className="avatar" style={{ background: T.accent }}>{(u.full_name || 'U').charAt(0).toUpperCase()}</div>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>{u.full_name || 'No name'}</div>
+                            {isLow && <div style={{ fontSize: 11, color: T.danger }}>⚠ Low on quotes</div>}
+                          </div>
                         </div>
                       </td>
-                      <td>{p?<span className="badge badge-blue">{p.name}</span>:<span className="badge badge-gray">No plan</span>}</td>
+                      <td>{p ? <span className="badge badge-blue">{p.name}</span> : <span className="badge badge-gray">No plan</span>}</td>
                       <td>
-                        <span className="mono" style={{fontWeight:600}}>{used}</span>
-                        {limit&&limit!==-1&&<span style={{color:T.textMuted}}> /{limit}</span>}
-                        {limit&&limit!==-1&&<div className="quota-bar" style={{width:80,marginTop:4}}><div className={`quota-fill ${col}`} style={{width:`${pct}%`}}/></div>}
+                        <span className="mono" style={{ fontWeight: 600 }}>{used}</span>
+                        {limit && limit !== -1 && <span style={{ color: T.textMuted }}> /{limit}</span>}
+                        {limit && limit !== -1 && <div className="quota-bar" style={{ width: 80, marginTop: 4 }}><div className={`quota-fill ${col}`} style={{ width: `${pct}%` }} /></div>}
                       </td>
-                      <td><span className="mono" style={{fontWeight:700,color:rem===0?T.danger:T.success}}>{rem}</span></td>
-                      <td style={{color:T.textMuted,fontSize:12}}>{last?new Date(last.created_at).toLocaleDateString():'No activity'}</td>
+                      <td><span className="mono" style={{ fontWeight: 700, color: rem === 0 ? T.danger : T.success }}>{rem}</span></td>
+                      <td style={{ color: T.textMuted, fontSize: 12 }}>{last ? new Date(last.created_at).toLocaleDateString() : 'No activity'}</td>
+                      <td>
+                        <button className="btn btn-accent btn-sm" onClick={() => setAddQuotesFor(u)}
+                          style={{ fontSize: 12 }}>
+                          + Add Quotes
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
-                {contractors.length===0&&<tr><td colSpan={5} style={{textAlign:'center',color:T.textMuted,padding:32}}>No contractors yet.</td></tr>}
+                {contractors.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No contractors yet.</td></tr>}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {tab==="quotes"&&(
+      {/* QUOTES TAB */}
+      {tab === "quotes" && (
         <div className="fade-up">
-          <h3 style={{fontWeight:700,fontSize:18,marginBottom:20}}>All Quotes</h3>
+          <h3 style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>All Quotes</h3>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Customer</th><th>Contractor</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
               <tbody>
-                {quotes.map(q=>(
-                  <tr key={q.id} className="clickable" onClick={()=>setSelQuote(q)}>
-                    <td><div style={{fontWeight:600}}>{q.customer_name}</div><div style={{fontSize:11,color:T.textMuted}}>{q.customer_email}</div></td>
+                {quotes.map(q => (
+                  <tr key={q.id} className="clickable" onClick={() => setSelQuote(q)}>
+                    <td><div style={{ fontWeight: 600 }}>{q.customer_name}</div><div style={{ fontSize: 11, color: T.textMuted }}>{q.customer_email}</div></td>
                     <td>
-                      <div style={{display:'flex',alignItems:'center',gap:6}}>
-                        <div className="avatar" style={{background:T.accent,width:24,height:24,fontSize:10}}>{(q.created_by_name||'U').charAt(0).toUpperCase()}</div>
-                        <span style={{fontSize:13}}>{q.created_by_name||'Unknown'}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className="avatar" style={{ background: T.accent, width: 24, height: 24, fontSize: 10 }}>{(q.created_by_name || 'U').charAt(0).toUpperCase()}</div>
+                        <span style={{ fontSize: 13 }}>{q.created_by_name || 'Unknown'}</span>
                       </div>
                     </td>
-                    <td style={{color:T.textMuted}}>{new Date(q.created_at).toLocaleDateString()}</td>
-                    <td><span className="mono" style={{fontWeight:700}}>{fmt(q.total)}</span></td>
-                    <td><StatusBadge status={q.status}/></td>
+                    <td style={{ color: T.textMuted }}>{new Date(q.created_at).toLocaleDateString()}</td>
+                    <td><span className="mono" style={{ fontWeight: 700 }}>{fmt(q.total)}</span></td>
+                    <td><StatusBadge status={q.status} /></td>
                   </tr>
                 ))}
-                {quotes.length===0&&<tr><td colSpan={5} style={{textAlign:'center',color:T.textMuted,padding:32}}>No quotes yet</td></tr>}
+                {quotes.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No quotes yet</td></tr>}
               </tbody>
             </table>
           </div>
-          <div style={{marginTop:10,fontSize:12,color:T.accent}}>Click any row to see full details</div>
-          {selQuote&&<QuoteDetailModal quote={selQuote} onClose={()=>setSelQuote(null)} onStatusChange={async(id,status)=>{await updateStatus(id,status);setSelQuote(q=>({...q,status}));}}/>}
+          <div style={{ marginTop: 10, fontSize: 12, color: T.accent }}>Click any row to see full details</div>
+          {selQuote && <QuoteDetailModal quote={selQuote} onClose={() => setSelQuote(null)} onStatusChange={async (id, status) => { await updateStatus(id, status); setSelQuote(q => ({ ...q, status })); }} />}
         </div>
       )}
 
-      {tab==="catalog"&&(
+      {/* BILLING TAB */}
+      {tab === "billing" && (
         <div className="fade-up">
-          <div className="info-box" style={{marginBottom:20}}>
-            <Icon name="info" size={14}/>
-            <div>
-              <strong>Your custom catalog</strong> — products you add here override global products of the same name for your contractors only. Global products are still available unless you create a custom version.
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ fontWeight: 700, fontSize: 18 }}>Billing History</h3>
+            <div style={{ background: T.accentLight, border: `1px solid #BFDBFE`, borderRadius: 10, padding: '8px 14px' }}>
+              <span style={{ fontSize: 12, color: T.textMuted }}>Total spent: </span>
+              <span style={{ fontWeight: 800, fontFamily: 'DM Mono', color: T.accent }}>{fmt(billingTotal)}</span>
             </div>
           </div>
-          <ProductsAdmin appData={appData} showToast={t=>setToast({message:t,type:"success"})} companyId={auth.companyId} companies={[]}/>
+          {transactions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 60, color: T.textMuted }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>💳</div>
+              <div style={{ fontWeight: 600 }}>No transactions yet</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>Purchases will appear here</div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Date</th><th>Contractor</th><th>Type</th><th>Description</th><th>Quotes</th><th>Amount</th><th>Status</th></tr></thead>
+                <tbody>
+                  {transactions.map(t => (
+                    <tr key={t.id}>
+                      <td style={{ color: T.textMuted, fontSize: 12 }}>{new Date(t.created_at).toLocaleDateString()}</td>
+                      <td style={{ fontWeight: 600, fontSize: 13 }}>{t.contractor_name}</td>
+                      <td>
+                        <span className={`badge ${t.type === 'plan_upgrade' ? 'badge-purple' : 'badge-blue'}`}>
+                          {t.type === 'plan_upgrade' ? '⬆️ Upgrade' : '🎁 Pack'}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 12, color: T.textMuted, maxWidth: 200 }}>{t.description}</td>
+                      <td><span className="mono" style={{ fontWeight: 700, color: T.success }}>+{t.quotes_added}</span></td>
+                      <td><span className="mono" style={{ fontWeight: 700 }}>{fmt(t.amount)}</span></td>
+                      <td>
+                        <span className={`badge ${t.status === 'paid' ? 'badge-green' : t.status === 'pending' ? 'badge-orange' : 'badge-red'}`}>
+                          {t.payment_method === 'mock' ? '🔸 Mock' : t.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="info-box" style={{ marginTop: 16 }}>
+            <Icon name="info" size={14} />
+            <span>Transactions marked <strong>🔸 Mock</strong> will be real Stripe charges once payments are connected.</span>
+          </div>
+        </div>
+      )}
+
+      {/* CATALOG TAB */}
+      {tab === "catalog" && (
+        <div className="fade-up">
+          <div className="info-box" style={{ marginBottom: 20 }}>
+            <Icon name="info" size={14} />
+            <div><strong>Your custom catalog</strong> — products you add here override global products of the same name for your contractors only.</div>
+          </div>
+          <ProductsAdmin appData={appData} showToast={t => setToast({ message: t, type: "success" })} companyId={auth.companyId} companies={[]} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SUPER BILLING PANEL ──────────────────────────────────────────────────────
+function SuperBillingPanel({ companyFilter }) {
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetch = async () => {
+      setLoading(true);
+      let q = supabase.from('billing_transactions').select('*').order('created_at', { ascending: false });
+      if (companyFilter) q = q.eq('company_id', companyFilter.id);
+      const { data } = await q;
+      if (data) setTransactions(data);
+      setLoading(false);
+    };
+    fetch();
+  }, [companyFilter?.id]);
+
+  if (loading) return <LoadingScreen />;
+
+  const totalRevenue = transactions.reduce((s, t) => s + (t.amount || 0), 0);
+  const mockCount = transactions.filter(t => t.payment_method === 'mock').length;
+  const realCount = transactions.filter(t => t.payment_method === 'stripe').length;
+
+  // Group by company for summary
+  const byCompany = transactions.reduce((acc, t) => {
+    const key = t.company_name || 'Unknown';
+    if (!acc[key]) acc[key] = { name: key, total: 0, count: 0 };
+    acc[key].total += t.amount || 0;
+    acc[key].count++;
+    return acc;
+  }, {});
+
+  return (
+    <div className="fade-up">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h3 style={{ fontWeight: 700, fontSize: 18 }}>
+          {companyFilter ? `${companyFilter.name} — Billing` : 'All Billing Transactions'}
+        </h3>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+        {[
+          { label: 'Total Revenue', value: fmt(totalRevenue), color: T.accent, bg: T.accentLight },
+          { label: 'Transactions', value: transactions.length, color: T.text, bg: T.surfaceAlt },
+          { label: 'Mock (pending Stripe)', value: mockCount, color: T.warning, bg: T.warningLight },
+          { label: 'Real Payments', value: realCount, color: T.success, bg: T.successLight },
+        ].map(s => (
+          <div key={s.label} style={{ background: s.bg, borderRadius: 12, padding: '16px', border: `1px solid ${T.border}` }}>
+            <div style={{ fontWeight: 800, fontSize: 24, fontFamily: 'DM Mono', color: s.color }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Company breakdown (only when not filtered) */}
+      {!companyFilter && Object.keys(byCompany).length > 1 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: T.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>By Company</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {Object.values(byCompany).sort((a, b) => b.total - a.total).map(c => (
+              <div key={c.name} style={{ background: T.surface, border: `1.5px solid ${T.border}`, borderRadius: 10, padding: '10px 14px', minWidth: 140 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+                <div style={{ fontWeight: 800, fontFamily: 'DM Mono', color: T.accent }}>{fmt(c.total)}</div>
+                <div style={{ fontSize: 11, color: T.textMuted }}>{c.count} transactions</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {transactions.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: T.textMuted }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>💰</div>
+          <div style={{ fontWeight: 600 }}>No transactions yet</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>They'll appear here as companies purchase quotes</div>
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Company</th><th>Contractor</th><th>Type</th><th>Description</th><th>Quotes</th><th>Amount</th><th>Payment</th></tr>
+            </thead>
+            <tbody>
+              {transactions.map(t => (
+                <tr key={t.id}>
+                  <td style={{ color: T.textMuted, fontSize: 12 }}>{new Date(t.created_at).toLocaleDateString()}</td>
+                  <td style={{ fontWeight: 600, fontSize: 13 }}>{t.company_name || '—'}</td>
+                  <td style={{ fontSize: 13 }}>{t.contractor_name || '—'}</td>
+                  <td><span className={`badge ${t.type === 'plan_upgrade' ? 'badge-purple' : 'badge-blue'}`}>{t.type === 'plan_upgrade' ? '⬆️ Upgrade' : '🎁 Pack'}</span></td>
+                  <td style={{ fontSize: 12, color: T.textMuted, maxWidth: 200 }}>{t.description}</td>
+                  <td><span className="mono" style={{ fontWeight: 700, color: T.success }}>+{t.quotes_added}</span></td>
+                  <td><span className="mono" style={{ fontWeight: 800 }}>{fmt(t.amount)}</span></td>
+                  <td>
+                    <span className={`badge ${t.payment_method === 'stripe' ? 'badge-green' : 'badge-orange'}`}>
+                      {t.payment_method === 'stripe' ? '✓ Stripe' : '🔸 Mock'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {mockCount > 0 && (
+        <div className="info-box" style={{ marginTop: 16 }}>
+          <Icon name="info" size={14} />
+          <span><strong>{mockCount} mock transaction{mockCount > 1 ? 's' : ''}</strong> recorded. Once Stripe is connected, these will become real charges automatically.</span>
         </div>
       )}
     </div>
