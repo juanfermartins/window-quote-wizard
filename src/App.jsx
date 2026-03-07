@@ -1377,17 +1377,30 @@ function CompanyAdminPanel({ appData, auth }) {
   const fetchAll = async () => {
     setLoading(true);
     const [us, qu, tx] = await Promise.all([
-      // profiles query: contractors appear even with NO subscription
       supabase.from('profiles')
-        .select('*, subscriptions!subscriptions_user_id_fkey(*, plans(*))')
+        .select('*')
         .eq('company_id', auth.companyId)
         .eq('role', 'contractor'),
       supabase.from('quotes').select('*').eq('company_id', auth.companyId).order('created_at', { ascending: false }),
       supabase.from('billing_transactions').select('*').eq('company_id', auth.companyId).order('created_at', { ascending: false }),
     ]);
-    if (us.data) setContractors(us.data);
     if (qu.data) setQuotes(qu.data);
     if (tx.data) setTransactions(tx.data);
+    if (us.data && us.data.length > 0) {
+      const userIds = us.data.map(u => u.id);
+      const { data: subs } = await supabase
+        .from('subscriptions')
+        .select('*, plans(*)')
+        .in('user_id', userIds)
+        .eq('status', 'active');
+      const merged = us.data.map(u => ({
+        ...u,
+        subscriptions: subs ? subs.filter(s => s.user_id === u.id) : [],
+      }));
+      setContractors(merged);
+    } else {
+      setContractors([]);
+    }
     setLoading(false);
   };
 
