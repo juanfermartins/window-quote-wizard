@@ -1079,7 +1079,7 @@ function SuperAdminPanel({ appData, auth }) {
 
 // ─── ADD QUOTES MODAL ─────────────────────────────────────────────────────────
 function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, onSuccess }) {
-  const [mode, setMode] = useState('pack');         // 'pack' | 'upgrade'
+  const [mode, setMode] = useState(contractor._forceMode || 'pack');
   const [packs, setPacks] = useState([]);
   const [plans, setPlans] = useState([]);
   const [selectedPack, setSelectedPack] = useState(null);
@@ -1138,13 +1138,29 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
         });
 
       } else if (mode === 'upgrade' && selectedPlan) {
-        // Upgrade plan
-        await supabase.from('subscriptions').update({
-          plan_id: selectedPlan.id,
-          quotes_used: 0,         // reset counter on upgrade
-          period_start: new Date().toISOString().split('T')[0],
-          period_end: new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0],
-        }).eq('id', sub.id);
+        const today = new Date().toISOString().split('T')[0];
+        const end = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0];
+
+        if (sub) {
+          // Has existing subscription — update it
+          await supabase.from('subscriptions').update({
+            plan_id: selectedPlan.id,
+            quotes_used: 0,
+            period_start: today,
+            period_end: end,
+          }).eq('id', sub.id);
+        } else {
+          // No subscription yet — create one
+          await supabase.from('subscriptions').insert({
+            user_id: contractor.id,
+            company_id: companyId,
+            plan_id: selectedPlan.id,
+            quotes_used: 0,
+            period_start: today,
+            period_end: end,
+            status: 'active',
+          });
+        }
 
         const upgradeCost = selectedPlan.price_monthly - (currentPlan?.price_monthly || 0);
         await supabase.from('billing_transactions').insert({
@@ -1361,7 +1377,11 @@ function CompanyAdminPanel({ appData, auth }) {
   const fetchAll = async () => {
     setLoading(true);
     const [us, qu, tx] = await Promise.all([
-      supabase.from('profiles').select('*, subscriptions(*, plans(*))').eq('company_id', auth.companyId).eq('role', 'contractor'),
+      // profiles query: contractors appear even with NO subscription
+      supabase.from('profiles')
+        .select('*, subscriptions!subscriptions_user_id_fkey(*, plans(*))')
+        .eq('company_id', auth.companyId)
+        .eq('role', 'contractor'),
       supabase.from('quotes').select('*').eq('company_id', auth.companyId).order('created_at', { ascending: false }),
       supabase.from('billing_transactions').select('*').eq('company_id', auth.companyId).order('created_at', { ascending: false }),
     ]);
@@ -1435,41 +1455,74 @@ function CompanyAdminPanel({ appData, auth }) {
               <tbody>
                 {contractors.map(u => {
                   const s = u.subscriptions?.[0]; const p = s?.plans;
+                  const hasPlan = !!p;
                   const used = s?.quotes_used || 0; const limit = p?.quote_limit ?? null;
                   const rem = limit === null ? '—' : limit === -1 ? '∞' : Math.max(0, limit - used);
                   const pct = limit && limit !== -1 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
                   const col = pct >= 90 ? 'danger' : pct >= 70 ? 'warning' : 'ok';
                   const last = quotes.filter(q => q.created_by === u.id).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-                  const isLow = rem !== '∞' && rem !== '—' && rem <= 3;
+                  const isLow = hasPlan && rem !== '∞' && rem !== '—' && Number(rem) <= 3;
                   return (
                     <tr key={u.id}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div className="avatar" style={{ background: T.accent }}>{(u.full_name || 'U').charAt(0).toUpperCase()}</div>
+                          <div className="avatar" style={{ background: hasPlan ? T.accent : T.textLight }}>
+                            {(u.full_name || 'U').charAt(0).toUpperCase()}
+                          </div>
                           <div>
                             <div style={{ fontWeight: 600 }}>{u.full_name || 'No name'}</div>
-                            {isLow && <div style={{ fontSize: 11, color: T.danger }}>⚠ Low on quotes</div>}
+                            {!hasPlan && <div style={{ fontSize: 11, color: T.danger }}>⚠ No plan — can't create quotes</div>}
+                            {isLow && <div style={{ fontSize: 11, color: T.warning }}>⚠ Low on quotes</div>}
                           </div>
                         </div>
                       </td>
-                      <td>{p ? <span className="badge badge-blue">{p.name}</span> : <span className="badge badge-gray">No plan</span>}</td>
                       <td>
-                        <span className="mono" style={{ fontWeight: 600 }}>{used}</span>
-                        {limit && limit !== -1 && <span style={{ color: T.textMuted }}> /{limit}</span>}
-                        {limit && limit !== -1 && <div className="quota-bar" style={{ width: 80, marginTop: 4 }}><div className={`quota-fill ${col}`} style={{ width: `${pct}%` }} /></div>}
+                        {hasPlan
+                          ? <span className="badge badge-blue">{p.name}</span>
+                          : <span className="badge badge-red">No Plan</span>
+                        }
                       </td>
-                      <td><span className="mono" style={{ fontWeight: 700, color: rem === 0 ? T.danger : T.success }}>{rem}</span></td>
-                      <td style={{ color: T.textMuted, fontSize: 12 }}>{last ? new Date(last.created_at).toLocaleDateString() : 'No activity'}</td>
                       <td>
-                        <button className="btn btn-accent btn-sm" onClick={() => setAddQuotesFor(u)}
-                          style={{ fontSize: 12 }}>
-                          + Add Quotes
-                        </button>
+                        {hasPlan ? (
+                          <>
+                            <span className="mono" style={{ fontWeight: 600 }}>{used}</span>
+                            {limit && limit !== -1 && <span style={{ color: T.textMuted }}> /{limit}</span>}
+                            {limit && limit !== -1 && <div className="quota-bar" style={{ width: 80, marginTop: 4 }}><div className={`quota-fill ${col}`} style={{ width: `${pct}%` }} /></div>}
+                          </>
+                        ) : <span style={{ color: T.textMuted, fontSize: 13 }}>—</span>}
+                      </td>
+                      <td>
+                        {hasPlan
+                          ? <span className="mono" style={{ fontWeight: 700, color: rem === 0 ? T.danger : T.success }}>{rem}</span>
+                          : <span style={{ color: T.textMuted }}>—</span>
+                        }
+                      </td>
+                      <td style={{ color: T.textMuted, fontSize: 12 }}>
+                        {last ? new Date(last.created_at).toLocaleDateString() : 'No activity'}
+                      </td>
+                      <td>
+                        {!hasPlan ? (
+                          // No plan → Assign Plan button (opens modal in upgrade mode)
+                          <button className="btn btn-primary btn-sm" onClick={() => setAddQuotesFor({ ...u, _forceMode: 'upgrade' })}
+                            style={{ fontSize: 12 }}>
+                            🚀 Assign Plan
+                          </button>
+                        ) : (
+                          // Has plan → Add Quotes button
+                          <button className="btn btn-accent btn-sm" onClick={() => setAddQuotesFor(u)}
+                            style={{ fontSize: 12 }}>
+                            + Add Quotes
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
-                {contractors.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No contractors yet.</td></tr>}
+                {contractors.length === 0 && (
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>
+                    No contractors yet. Ask your admin to add team members.
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>
