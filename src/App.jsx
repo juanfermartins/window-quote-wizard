@@ -474,50 +474,24 @@ function Step1({ data, onChange, errors }) {
 }
 
 // ─── AI WINDOW SCANNER ───────────────────────────────────────────────────────
+const EDGE_URL = "https://sjffssxyieeearvoiqjz.supabase.co/functions/v1/window-ai";
+
 async function analyzeWindowPhoto(base64Image, products) {
-  const productNames = products.map(p => p.name).join(', ');
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(EDGE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 1000,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: "image/jpeg", data: base64Image }
-          },
-          {
-            type: "text",
-            text: `You are a window installation expert. Analyze this window photo and respond ONLY with a JSON object, no markdown, no explanation.
-
-Available window types: ${productNames}
-
-Respond with exactly this JSON structure:
-{
-  "type": "best matching window type from the list above",
-  "width": estimated width in inches as integer,
-  "height": estimated height in inches as integer,
-  "confidence": "high" or "medium" or "low",
-  "notes": "brief explanation of what you see"
-}
-
-If you cannot determine dimensions, use standard sizes (36x48 for most windows).
-Only respond with the JSON object.`
-          }
-        ]
-      }]
-    })
+      action: "scan",
+      image: base64Image,
+      products: products.map(p => p.name),
+    }),
   });
-  const data = await response.json();
-  const text = data.content?.[0]?.text || '{}';
-  try { return JSON.parse(text); } catch { return null; }
+  if (!response.ok) return null;
+  try { return await response.json(); } catch { return null; }
 }
 
 // ─── PDF GENERATOR ────────────────────────────────────────────────────────────
-function generateContractHTML({ customer, windows, serviceLines, total, downPct, company, contractorName, date }) {
+function generateContractHTML({ customer, windows, serviceLines, total, downPct, company, contractorName, date, signatureData }) {
   const downAmt = Math.round(total * downPct / 100);
   const balance = total - downAmt;
   const windowRows = windows.map(w => `
@@ -605,9 +579,11 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
 
   <div class="signature-section">
     <div>
-      <div class="sig-line">Customer Signature / Date</div>
+      ${signatureData ? `<img src="${signatureData}" style="max-width:200px;max-height:60px;display:block;margin-bottom:8px"/>` : '<div style="height:60px"></div>'}
+      <div class="sig-line">Customer Signature / Date: ${date}</div>
     </div>
     <div>
+      <div style="height:60px"></div>
       <div class="sig-line">Contractor Signature / Date</div>
     </div>
   </div>
@@ -622,36 +598,20 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
 
 // ─── EMAIL SENDER ─────────────────────────────────────────────────────────────
 async function sendContractEmail({ to, customerName, contractHTML, company }) {
-  const response = await fetch("https://api.resend.com/emails", {
+  const response = await fetch(EDGE_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${RESEND_KEY}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: RESEND_FROM,
-      to: [to],
-      subject: `Your Window Installation Contract — ${company?.name || 'WindowQuote'}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-          <h2 style="color:#1a1a1a">Hi ${customerName},</h2>
-          <p>Please find your window installation contract attached below.</p>
-          <p>Review the details and sign at your earliest convenience.</p>
-          <div style="background:#f5f5f5;border-radius:8px;padding:16px;margin:20px 0">
-            <strong>${company?.name || 'WindowQuote'}</strong><br>
-            ${company?.phone || ''}<br>
-            ${company?.address || ''}
-          </div>
-          <hr style="border:none;border-top:1px solid #eee;margin:20px 0"/>
-          ${contractHTML}
-          <p style="font-size:12px;color:#999;margin-top:24px">
-            Sent via WindowQuote · Professional Window Quoting Platform
-          </p>
-        </div>
-      `,
+      action: "email",
+      to,
+      customerName,
+      contractHTML,
+      companyName: company?.name || 'WindowQuote',
     }),
   });
-  return response.ok;
+  if (!response.ok) return false;
+  const data = await response.json();
+  return data.ok === true;
 }
 
 // ─── EDIT CONTRACTOR NAME MODAL ───────────────────────────────────────────────
@@ -761,8 +721,9 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
           </button>
           <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
             onClick={()=>fileRef.current?.click()} disabled={scanning}>
-            {scanning ? '🔍 Scanning...' : '📷 Scan Photo'}
+            {scanning ? '🔍 Analyzing...' : '📷 Scan Photo'}
           </button>
+          {/* accepts both camera and file picker — on mobile opens camera directly */}
           <input ref={fileRef} type="file" accept="image/*" capture="environment"
             style={{display:'none'}} onChange={handleScan}/>
         </div>
@@ -933,7 +894,7 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
 }
 
 // ─── POST-WIZARD ──────────────────────────────────────────────────────────────
-function ContractReady({ customer, total, downPct, windows, serviceLines, company, contractorName, onSign }) {
+function ContractReady({ customer, total, downPct, windows, serviceLines, company, contractorName, signature, onSign }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [emailError, setEmailError] = useState(null);
@@ -942,6 +903,7 @@ function ContractReady({ customer, total, downPct, windows, serviceLines, compan
     customer, windows, serviceLines, total, downPct,
     company, contractorName,
     date: new Date().toLocaleDateString(),
+    signatureData: signature,
   });
 
   const downloadPDF = () => {
@@ -1010,38 +972,58 @@ function SignContract({ customer, onPay }) {
   const ref=useRef(null);
   const [signed,setSigned]=useState(false);
   const [drawing,setDrawing]=useState(false);
-  const draw=(e)=>{
-    if(!drawing)return;
-    const c=ref.current;const ctx=c.getContext('2d');const r=c.getBoundingClientRect();
-    ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle=T.text;
-    ctx.lineTo(e.clientX-r.left,e.clientY-r.top);ctx.stroke();ctx.beginPath();ctx.moveTo(e.clientX-r.left,e.clientY-r.top);
+
+  const getPos = (e, canvas) => {
+    const r = canvas.getBoundingClientRect();
+    if (e.touches) return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
+
+  const startDraw = (e) => { e.preventDefault(); setDrawing(true); const c=ref.current; const ctx=c.getContext('2d'); const p=getPos(e,c); ctx.beginPath(); ctx.moveTo(p.x,p.y); };
+  const draw = (e) => {
+    if(!drawing) return; e.preventDefault();
+    const c=ref.current; const ctx=c.getContext('2d'); const p=getPos(e,c);
+    ctx.lineWidth=2; ctx.lineCap='round'; ctx.strokeStyle=T.text;
+    ctx.lineTo(p.x,p.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(p.x,p.y);
+  };
+  const endDraw = (e) => { e.preventDefault(); setDrawing(false); setSigned(true); };
+
+  const handlePay = () => {
+    const sigData = ref.current?.toDataURL('image/png');
+    onPay(sigData);
+  };
+
   return(
     <div className="step-content fade-up">
       <h2 className="step-title">Sign Contract</h2>
       <p className="step-subtitle">Draw your signature below.</p>
       <div style={{border:`1.5px solid ${T.border}`,borderRadius:12,overflow:'hidden',background:T.surfaceAlt,position:'relative'}}>
-        <canvas ref={ref} width={350} height={120} style={{display:'block',cursor:'crosshair'}}
-          onMouseDown={()=>setDrawing(true)} onMouseUp={()=>{setDrawing(false);setSigned(true);}} onMouseMove={draw}/>
-        {!signed&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',color:T.textLight,fontSize:13,pointerEvents:'none'}}>Draw here</div>}
+        <canvas ref={ref} width={350} height={120} style={{display:'block',cursor:'crosshair',touchAction:'none'}}
+          onMouseDown={startDraw} onMouseUp={endDraw} onMouseMove={draw}
+          onTouchStart={startDraw} onTouchEnd={endDraw} onTouchMove={draw}
+        />
+        {!signed&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',color:T.textLight,fontSize:13,pointerEvents:'none'}}>Sign here with finger or mouse</div>}
       </div>
       <div style={{display:'flex',justifyContent:'space-between',marginTop:8,marginBottom:20}}>
         <span style={{fontSize:12,color:T.textMuted}}>{customer.name} · {new Date().toLocaleDateString()}</span>
         <button style={{background:'none',border:'none',fontSize:12,color:T.accent,cursor:'pointer'}} onClick={()=>{ref.current.getContext('2d').clearRect(0,0,400,120);setSigned(false);}}>Clear</button>
       </div>
-      <button className="btn btn-primary btn-full" disabled={!signed} onClick={onPay}>Confirm → Pay Deposit</button>
+      <button className="btn btn-primary btn-full" disabled={!signed} onClick={handlePay}>Confirm → Pay Deposit</button>
     </div>
   );
 }
 
-function PayDeposit({ downAmt }) {
+function PayDeposit({ downAmt, onNewQuote }) {
   const [paying,setPaying]=useState(false);
   const [paid,setPaid]=useState(false);
   if(paid)return(
     <div className="step-content fade-up" style={{textAlign:'center',paddingTop:60}}>
       <div className="success-icon">✅</div>
       <h2 className="step-title" style={{textAlign:'center'}}>Payment Received!</h2>
-      <p className="step-subtitle" style={{textAlign:'center'}}>Deposit of <strong>{fmt(downAmt)}</strong> processed.</p>
+      <p className="step-subtitle" style={{textAlign:'center'}}>Deposit of <strong>{fmt(downAmt)}</strong> processed successfully.</p>
+      <button className="btn btn-primary btn-full" style={{marginTop:24}} onClick={onNewQuote}>
+        ＋ Start New Quote
+      </button>
     </div>
   );
   return(
@@ -1081,6 +1063,7 @@ function Wizard({ appData, auth }) {
   const [total,setTotal]=useState(0);
   const [noQuota,setNoQuota]=useState(false);
   const [checking,setChecking]=useState(false);
+  const [signature,setSignature]=useState(null);
 
   const validate=()=>{
     const e={};
@@ -1107,8 +1090,8 @@ function Wizard({ appData, auth }) {
   if(loading)return <LoadingScreen/>;
   const cu={id:auth.user?.id,email:auth.user?.email,full_name:auth.profile?.full_name,company_id:auth.companyId,company_name:auth.company?.name};
 
-  if(post==="pay")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><PayDeposit downAmt={Math.round(total*downPct/100)}/></div>;
-  if(post==="sign")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><SignContract customer={customer} onPay={()=>setPost("pay")}/></div>;
+  if(post==="pay")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><PayDeposit downAmt={Math.round(total*downPct/100)} onNewQuote={()=>{setPost(null);setStep(1);setCustomer({name:"",email:"",phone:"",address:"",zip:""});setWindows([]);setSelected([]);setSignature(null);}}/></div>;
+  if(post==="sign")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><SignContract customer={customer} onPay={(sig)=>{setSignature(sig);setPost("pay");}}/></div>;
   if(post==="contract"){
     const count=windows.reduce((s,w)=>s+(w.qty||1),0);
     const serviceLines=dbServices.filter(s=>selected.includes(s.id)).map(s=>({
@@ -1122,6 +1105,7 @@ function Wizard({ appData, auth }) {
           customer={customer} total={total} downPct={downPct}
           windows={windows} serviceLines={serviceLines}
           company={auth.company} contractorName={auth.profile?.full_name||auth.user?.email}
+          signature={signature}
           onSign={()=>setPost("sign")}
         />
       </div>
