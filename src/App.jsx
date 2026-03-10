@@ -475,19 +475,20 @@ function Step1({ data, onChange, errors }) {
 
 // ─── AI WINDOW SCANNER ───────────────────────────────────────────────────────
 const EDGE_URL = "https://sjffssxyieeearvoiqjz.supabase.co/functions/v1/window-ai";
+const EDGE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqZmZzc3h5aWVlZWFydm9pcWp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE2NTI0OTUsImV4cCI6MjA1NzIyODQ5NX0.LPKs_mwFMnMfDdQHMSuNbdCl1bOHRTaFWfNxHPZzabk";
 
 async function analyzeWindowPhoto(base64Image, products) {
-  const response = await fetch(EDGE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "scan",
-      image: base64Image,
-      products: products.map(p => p.name),
-    }),
-  });
-  if (!response.ok) return null;
-  try { return await response.json(); } catch { return null; }
+  try {
+    const response = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${EDGE_ANON}` },
+      body: JSON.stringify({ action: "scan", image: base64Image, products: products.map(p => p.name) }),
+    });
+    const text = await response.text();
+    console.log("Edge scan response:", response.status, text);
+    if (!response.ok) return null;
+    return JSON.parse(text);
+  } catch(e) { console.error("Edge scan error:", e); return null; }
 }
 
 // ─── PDF GENERATOR ────────────────────────────────────────────────────────────
@@ -598,20 +599,17 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
 
 // ─── EMAIL SENDER ─────────────────────────────────────────────────────────────
 async function sendContractEmail({ to, customerName, contractHTML, company }) {
-  const response = await fetch(EDGE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "email",
-      to,
-      customerName,
-      contractHTML,
-      companyName: company?.name || 'WindowQuote',
-    }),
-  });
-  if (!response.ok) return false;
-  const data = await response.json();
-  return data.ok === true;
+  try {
+    const response = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${EDGE_ANON}` },
+      body: JSON.stringify({ action: "email", to, customerName, contractHTML, companyName: company?.name || 'WindowQuote' }),
+    });
+    const text = await response.text();
+    console.log("Edge email response:", response.status, text);
+    if (!response.ok) return false;
+    return JSON.parse(text).ok === true;
+  } catch(e) { console.error("Edge email error:", e); return false; }
 }
 
 // ─── EDIT CONTRACTOR NAME MODAL ───────────────────────────────────────────────
