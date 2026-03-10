@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase";
 
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const RESEND_KEY = import.meta.env.VITE_RESEND_KEY;
+const RESEND_FROM = "WindowQuote <onboarding@resend.dev>";
+const ANTHROPIC_MODEL = "claude-opus-4-20250514";
+
 // ─── DESIGN TOKENS ────────────────────────────────────────────────────────────
 const T = {
   bg: "#F8F7F4", surface: "#FFFFFF", surfaceAlt: "#F2F1EE",
@@ -468,6 +473,220 @@ function Step1({ data, onChange, errors }) {
   );
 }
 
+// ─── AI WINDOW SCANNER ───────────────────────────────────────────────────────
+async function analyzeWindowPhoto(base64Image, products) {
+  const productNames = products.map(p => p.name).join(', ');
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/jpeg", data: base64Image }
+          },
+          {
+            type: "text",
+            text: `You are a window installation expert. Analyze this window photo and respond ONLY with a JSON object, no markdown, no explanation.
+
+Available window types: ${productNames}
+
+Respond with exactly this JSON structure:
+{
+  "type": "best matching window type from the list above",
+  "width": estimated width in inches as integer,
+  "height": estimated height in inches as integer,
+  "confidence": "high" or "medium" or "low",
+  "notes": "brief explanation of what you see"
+}
+
+If you cannot determine dimensions, use standard sizes (36x48 for most windows).
+Only respond with the JSON object.`
+          }
+        ]
+      }]
+    })
+  });
+  const data = await response.json();
+  const text = data.content?.[0]?.text || '{}';
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+// ─── PDF GENERATOR ────────────────────────────────────────────────────────────
+function generateContractHTML({ customer, windows, serviceLines, total, downPct, company, contractorName, date }) {
+  const downAmt = Math.round(total * downPct / 100);
+  const balance = total - downAmt;
+  const windowRows = windows.map(w => `
+    <tr>
+      <td>${w.qty}x ${w.type}</td>
+      <td>${w.material} / ${w.color} / ${w.glass}</td>
+      <td>${w.width}" × ${w.height}"</td>
+    </tr>`).join('');
+  const serviceRows = serviceLines.map(s => `
+    <tr><td>${s.label}</td><td style="text-align:right">$${s.amount.toLocaleString()}</td></tr>`).join('');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 40px; color: #1a1a1a; font-size: 13px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #1a1a1a; }
+  .company-name { font-size: 22px; font-weight: 800; }
+  .company-info { font-size: 12px; color: #666; margin-top: 4px; }
+  .contract-title { font-size: 18px; font-weight: 700; text-align: right; }
+  .contract-date { font-size: 12px; color: #666; text-align: right; margin-top: 4px; }
+  .section { margin-bottom: 24px; }
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .info-item label { font-size: 11px; color: #888; display: block; }
+  .info-item span { font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f5f5f5; padding: 8px 10px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 8px 10px; border-bottom: 1px solid #eee; }
+  .totals { margin-left: auto; width: 260px; margin-top: 16px; }
+  .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .total-row.grand { font-weight: 800; font-size: 16px; border-top: 2px solid #1a1a1a; padding-top: 10px; margin-top: 4px; }
+  .total-row.down { color: #16a34a; font-weight: 700; }
+  .signature-section { margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .sig-line { border-top: 1px solid #1a1a1a; padding-top: 8px; font-size: 11px; color: #666; margin-top: 48px; }
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="company-name">${company?.name || 'WindowQuote'}</div>
+      <div class="company-info">${company?.phone || ''} ${company?.address ? '· ' + company.address : ''}</div>
+      <div class="company-info">Prepared by: ${contractorName}</div>
+    </div>
+    <div>
+      <div class="contract-title">INSTALLATION CONTRACT</div>
+      <div class="contract-date">Date: ${date}</div>
+      <div class="contract-date">Contract #: WQ-${Date.now().toString().slice(-6)}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Customer Information</div>
+    <div class="info-grid">
+      <div class="info-item"><label>Name</label><span>${customer.name}</span></div>
+      <div class="info-item"><label>Email</label><span>${customer.email}</span></div>
+      <div class="info-item"><label>Phone</label><span>${customer.phone}</span></div>
+      <div class="info-item"><label>Property Address</label><span>${customer.address}, ${customer.zip}</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Window Specifications</div>
+    <table>
+      <thead><tr><th>Type</th><th>Specs</th><th>Dimensions</th></tr></thead>
+      <tbody>${windowRows}</tbody>
+    </table>
+  </div>
+
+  ${serviceLines.length > 0 ? `
+  <div class="section">
+    <div class="section-title">Services</div>
+    <table>
+      <tbody>${serviceRows}</tbody>
+    </table>
+  </div>` : ''}
+
+  <div class="totals">
+    <div class="total-row grand"><span>Total</span><span>$${total.toLocaleString()}</span></div>
+    <div class="total-row down"><span>Down Payment (${downPct}%)</span><span>$${downAmt.toLocaleString()}</span></div>
+    <div class="total-row"><span>Balance Due</span><span>$${balance.toLocaleString()}</span></div>
+  </div>
+
+  <div class="signature-section">
+    <div>
+      <div class="sig-line">Customer Signature / Date</div>
+    </div>
+    <div>
+      <div class="sig-line">Contractor Signature / Date</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    This contract is binding upon signature. Work will commence upon receipt of down payment.<br>
+    Generated by WindowQuote · ${company?.name || ''}
+  </div>
+</body>
+</html>`;
+}
+
+// ─── EMAIL SENDER ─────────────────────────────────────────────────────────────
+async function sendContractEmail({ to, customerName, contractHTML, company }) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${RESEND_KEY}`,
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM,
+      to: [to],
+      subject: `Your Window Installation Contract — ${company?.name || 'WindowQuote'}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h2 style="color:#1a1a1a">Hi ${customerName},</h2>
+          <p>Please find your window installation contract attached below.</p>
+          <p>Review the details and sign at your earliest convenience.</p>
+          <div style="background:#f5f5f5;border-radius:8px;padding:16px;margin:20px 0">
+            <strong>${company?.name || 'WindowQuote'}</strong><br>
+            ${company?.phone || ''}<br>
+            ${company?.address || ''}
+          </div>
+          <hr style="border:none;border-top:1px solid #eee;margin:20px 0"/>
+          ${contractHTML}
+          <p style="font-size:12px;color:#999;margin-top:24px">
+            Sent via WindowQuote · Professional Window Quoting Platform
+          </p>
+        </div>
+      `,
+    }),
+  });
+  return response.ok;
+}
+
+// ─── EDIT CONTRACTOR NAME MODAL ───────────────────────────────────────────────
+function EditNameModal({ contractor, onClose, onSave }) {
+  const [name, setName] = useState(contractor.full_name || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    await supabase.from('profiles').update({ full_name: name.trim() }).eq('id', contractor.id);
+    setSaving(false);
+    onSave(contractor.id, name.trim());
+    onClose();
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 360 }}>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>Edit Contractor Name</div>
+        <div className="field">
+          <label className="label">Full Name</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)}
+            placeholder="John Smith" onKeyDown={e => e.key === 'Enter' && save()} autoFocus />
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 2 }} disabled={saving || !name.trim()} onClick={save}>
+            {saving ? 'Saving...' : <><Icon name="save" /> Save Name</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcPrice }) {
   const mats = Object.keys(matMult);
   const cols = Object.keys(colMult);
@@ -476,17 +695,52 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
   const [form,setForm] = useState(empty);
   const [editIdx,setEditIdx] = useState(null);
   const [show,setShow] = useState(false);
+  const [scanning,setScanning] = useState(false);
+  const [scanResult,setScanResult] = useState(null);
+  const fileRef = useRef(null);
 
   const add = () => {
     if(editIdx!==null){const u=[...windows];u[editIdx]=form;setWindows(u);setEditIdx(null);}
     else setWindows([...windows,{...form,id:Date.now()}]);
-    setForm(empty);setShow(false);
+    setForm(empty);setShow(false);setScanResult(null);
+  };
+
+  const handleScan = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanning(true); setScanResult(null);
+    try {
+      const base64 = await new Promise((res,rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const result = await analyzeWindowPhoto(base64, products);
+      if (result) {
+        setScanResult(result);
+        const matched = products.find(p => p.name.toLowerCase().includes(result.type?.toLowerCase()))?.name || products[0]?.name;
+        setForm(f => ({ ...f, type: matched, width: result.width||36, height: result.height||48 }));
+        setShow(true);
+      }
+    } catch(err) { console.error('Scan error:', err); }
+    setScanning(false);
+    e.target.value = '';
   };
 
   return (
     <div className="step-content fade-up">
       <h2 className="step-title">Windows</h2>
       <p className="step-subtitle">Configure each window for accurate pricing.</p>
+
+      {/* AI Scan Result Banner */}
+      {scanResult && (
+        <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13}}>
+          <strong>📷 AI detected:</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · Confidence: {scanResult.confidence}
+          {scanResult.notes && <div style={{color:T.textMuted,marginTop:2}}>{scanResult.notes}</div>}
+        </div>
+      )}
+
       {windows.map((w,i)=>(
         <div className="window-item" key={w.id||i}>
           <div><div style={{fontWeight:600,fontSize:14}}>{w.qty}× {w.type}</div><div style={{fontSize:12,color:T.textMuted}}>{w.material} · {w.color} · {w.glass} · {w.width}"×{w.height}"</div></div>
@@ -499,9 +753,20 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
           </div>
         </div>
       ))}
-      {!show?(
-        <button className="btn btn-secondary btn-full" onClick={()=>setShow(true)}><Icon name="plus"/> Add Window</button>
-      ):(
+
+      {!show && (
+        <div style={{display:'flex',gap:10,marginBottom:4}}>
+          <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setShow(true)}>
+            <Icon name="plus"/> Add Window
+          </button>
+          <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
+            onClick={()=>fileRef.current?.click()} disabled={scanning}>
+            {scanning ? '🔍 Scanning...' : '📷 Scan Photo'}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment"
+            style={{display:'none'}} onChange={handleScan}/>
+        </div>
+      )}
         <div className="card fade-up">
           <div style={{fontWeight:700,fontSize:15,marginBottom:16}}>{editIdx!==null?"Edit Window":"New Window"}</div>
           <div className="field"><label className="label">Type</label>
@@ -668,21 +933,75 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
 }
 
 // ─── POST-WIZARD ──────────────────────────────────────────────────────────────
-function ContractReady({ customer, total, downPct, onSign }) {
-  return(
-    <div className="step-content fade-up" style={{textAlign:'center',paddingTop:40}}>
+function ContractReady({ customer, total, downPct, windows, serviceLines, company, contractorName, onSign }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [emailError, setEmailError] = useState(null);
+
+  const contractHTML = generateContractHTML({
+    customer, windows, serviceLines, total, downPct,
+    company, contractorName,
+    date: new Date().toLocaleDateString(),
+  });
+
+  const downloadPDF = () => {
+    const win = window.open('', '_blank');
+    win.document.write(contractHTML);
+    win.document.close();
+    win.print(); // browser print → Save as PDF
+  };
+
+  const sendEmail = async () => {
+    setSending(true); setEmailError(null);
+    const ok = await sendContractEmail({
+      to: customer.email,
+      customerName: customer.name,
+      contractHTML,
+      company,
+    });
+    setSending(false);
+    if (ok) setSent(true);
+    else setEmailError("Failed to send. Check your Resend key.");
+  };
+
+  return (
+    <div className="step-content fade-up" style={{textAlign:'center',paddingTop:32}}>
       <div className="success-icon">📄</div>
       <h2 className="step-title" style={{textAlign:'center'}}>Contract Ready</h2>
-      <p className="step-subtitle" style={{textAlign:'center'}}>Ready for signature.</p>
-      <div className="card" style={{textAlign:'left',fontFamily:'DM Mono',fontSize:11,lineHeight:1.7,color:T.textMuted}}>
-        <div style={{fontWeight:700,fontSize:14,color:T.text,fontFamily:'DM Sans',marginBottom:8}}>WINDOW INSTALLATION CONTRACT</div>
-        <div>Customer: {customer.name}</div>
-        <div>Total: {fmt(total)} · Down: {fmt(Math.round(total*downPct/100))} ({downPct}%)</div>
+      <p className="step-subtitle" style={{textAlign:'center'}}>Review, download or email to your customer.</p>
+
+      <div className="card" style={{textAlign:'left',marginBottom:16}}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>WINDOW INSTALLATION CONTRACT</div>
+        <div style={{fontSize:13,color:T.textMuted}}>Customer: <strong style={{color:T.text}}>{customer.name}</strong></div>
+        <div style={{fontSize:13,color:T.textMuted}}>Email: {customer.email}</div>
+        <div style={{fontSize:13,color:T.textMuted}}>Total: <strong style={{color:T.text}}>{fmt(total)}</strong> · Down: {fmt(Math.round(total*downPct/100))} ({downPct}%)</div>
+        <div style={{fontSize:13,color:T.textMuted}}>Windows: {windows.length} item{windows.length!==1?'s':''}</div>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:8}}>
-        <button className="btn btn-secondary" style={{flex:1}}><Icon name="download"/> PDF</button>
-        <button className="btn btn-primary" style={{flex:2}} onClick={onSign}><Icon name="lock"/> Sign</button>
+
+      {/* Email status */}
+      {sent && (
+        <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>
+          ✅ Contract sent to {customer.email}
+        </div>
+      )}
+      {emailError && (
+        <div style={{background:T.dangerLight,border:`1px solid #FECACA`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.danger}}>
+          ⚠ {emailError}
+        </div>
+      )}
+
+      <div style={{display:'flex',gap:10,marginBottom:10}}>
+        <button className="btn btn-secondary" style={{flex:1}} onClick={downloadPDF}>
+          <Icon name="download"/> PDF
+        </button>
+        <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
+          onClick={sendEmail} disabled={sending||sent}>
+          {sending ? '📤 Sending...' : sent ? '✅ Sent' : '📧 Email'}
+        </button>
       </div>
+      <button className="btn btn-primary btn-full" onClick={onSign}>
+        <Icon name="lock"/> Sign Contract
+      </button>
     </div>
   );
 }
@@ -790,7 +1109,24 @@ function Wizard({ appData, auth }) {
 
   if(post==="pay")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><PayDeposit downAmt={Math.round(total*downPct/100)}/></div>;
   if(post==="sign")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><SignContract customer={customer} onPay={()=>setPost("pay")}/></div>;
-  if(post==="contract")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><ContractReady customer={customer} total={total} downPct={downPct} onSign={()=>setPost("sign")}/></div>;
+  if(post==="contract"){
+    const count=windows.reduce((s,w)=>s+(w.qty||1),0);
+    const serviceLines=dbServices.filter(s=>selected.includes(s.id)).map(s=>({
+      label:s.name,
+      amount:s.pricing_model==='per_window'?s.price*count:s.price
+    }));
+    return(
+      <div className="wizard-shell">
+        <div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div>
+        <ContractReady
+          customer={customer} total={total} downPct={downPct}
+          windows={windows} serviceLines={serviceLines}
+          company={auth.company} contractorName={auth.profile?.full_name||auth.user?.email}
+          onSign={()=>setPost("sign")}
+        />
+      </div>
+    );
+  }
 
   return(
     <div className="wizard-shell">
@@ -1368,7 +1704,8 @@ function CompanyAdminPanel({ appData, auth }) {
   const [quotes, setQuotes] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [selQuote, setSelQuote] = useState(null);
-  const [addQuotesFor, setAddQuotesFor] = useState(null); // contractor object
+  const [addQuotesFor, setAddQuotesFor] = useState(null);
+  const [editNameFor, setEditNameFor] = useState(null);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -1418,6 +1755,16 @@ function CompanyAdminPanel({ appData, auth }) {
   return (
     <div className="admin-shell">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {editNameFor && (
+        <EditNameModal
+          contractor={editNameFor}
+          onClose={() => setEditNameFor(null)}
+          onSave={(id, name) => {
+            setContractors(cs => cs.map(c => c.id === id ? { ...c, full_name: name } : c));
+            setToast({ message: "Name updated ✓", type: "success" });
+          }}
+        />
+      )}
       {addQuotesFor && (
         <AddQuotesModal
           contractor={addQuotesFor}
@@ -1483,7 +1830,14 @@ function CompanyAdminPanel({ appData, auth }) {
                             {(u.full_name || 'U').charAt(0).toUpperCase()}
                           </div>
                           <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <div style={{ fontWeight: 600 }}>{u.full_name || 'No name'}</div>
+                            <button onClick={() => setEditNameFor(u)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textMuted, padding: '2px 4px', borderRadius: 4, lineHeight: 1 }}
+                              title="Edit name">
+                              ✏️
+                            </button>
+                          </div>
                             {!hasPlan && <div style={{ fontSize: 11, color: T.danger }}>⚠ No plan — can't create quotes</div>}
                             {isLow && <div style={{ fontSize: 11, color: T.warning }}>⚠ Low on quotes</div>}
                           </div>
