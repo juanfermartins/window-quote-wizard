@@ -57,6 +57,17 @@ const T18N = {
   analyzing:        { en: '🔍 Analyzing...',      es: '🔍 Analizando...' },
   scan:             { en: '📷 Scan',             es: '📷 Escanear' },
   aiDetected:       { en: '📷 AI detected:',     es: '📷 IA detectó:' },
+  aiNoMatch:        { en: '⚠️ No exact match found', es: '⚠️ Sin coincidencia exacta' },
+  aiNoMatchSub:     { en: 'AI detected', es: 'IA detectó' },
+  aiNoMatchSub2:    { en: 'but no product matches. Choose the closest or set a custom price:', es: 'pero ningún producto coincide. Elige el más cercano o ingresa precio manual:' },
+  aiSuggested:      { en: '✨ AI Suggested:', es: '✨ IA Sugirió:' },
+  aiSuggestedBadge: { en: 'AI match', es: 'Match IA' },
+  customPrice:      { en: 'Custom price ($)', es: 'Precio manual ($)' },
+  customPriceHint:  { en: 'Enter a fixed price for this window', es: 'Ingresa un precio fijo para esta ventana' },
+  customPriceActive:{ en: '✏️ Custom price active', es: '✏️ Precio manual activo' },
+  aiNotes:          { en: '🤖 AI Scan Details', es: '🤖 Detalles del Escaneo IA' },
+  aiRawDesc:        { en: 'AI description:', es: 'Descripción IA:' },
+  aiScanned:        { en: '📷 AI Scanned', es: '📷 Escaneado por IA' },
   confidence:       { en: 'Confidence:',         es: 'Confianza:' },
   windowType:       { en: 'Type',                es: 'Tipo' },
   material:         { en: 'Material',            es: 'Material' },
@@ -558,6 +569,8 @@ function useAppData(companyId = null) {
   const cityMap = Object.fromEntries(cityRules.map(r=>[r.zip,r]));
 
   const calcPrice = (w) => {
+    // If contractor set a custom price (manual override after AI no-match)
+    if (w._customPrice && Number(w._customPrice) > 0) return Math.round(Number(w._customPrice) * (w.qty || 1));
     const prod = products.find(p=>p.name===w.type);
     return Math.round((prod?.base_price||300)*(matMult[w.material]||1)*(colMult[w.color]||1)*(glsMult[w.glass]||1)*sizeMult(w.width||36,w.height||48)*(w.qty||1));
   };
@@ -739,6 +752,25 @@ function QuoteDetailModal({ quote, onClose, onStatusChange }) {
             <div style={{fontSize:12,color:T.textMuted}}>{fmt(Math.round((quote.total||0)*(quote.down_pct||20)/100))} due</div>
           </div>
         </div>
+        {/* ── AI Scan Notes (admin only) ── */}
+        {(quote.ai_notes?.length > 0) && (
+          <div className="card-sm" style={{marginBottom:10,background:'#EFF6FF',border:'1px solid #BFDBFE'}}>
+            <div style={{fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'0.5px',color:'#1D4ED8',marginBottom:8}}>🤖 AI Scan Details</div>
+            {quote.ai_notes.map((a,i)=>(
+              <div key={i} style={{fontSize:12,padding:'6px 0',borderBottom:i<quote.ai_notes.length-1?`1px solid #BFDBFE`:'none'}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                  <span style={{fontWeight:600}}>Window {i+1}:</span>
+                  <span style={{color:'#1D4ED8'}}>AI detected: <strong>"{a.ai_detected}"</strong></span>
+                  {a.confidence && <span className="badge badge-blue" style={{fontSize:10}}>confidence: {a.confidence}</span>}
+                  {a.no_match && <span className="badge badge-red" style={{fontSize:10}}>⚠ No match</span>}
+                  {a.custom_price && <span className="badge badge-orange" style={{fontSize:10}}>✏ Manual: ${a.custom_price}</span>}
+                  {!a.no_match && <span className="badge badge-green" style={{fontSize:10}}>✓ Matched → {a.window_type_selected}</span>}
+                </div>
+                {a.notes && <div style={{color:'#6B7280',fontStyle:'italic',marginTop:3}}>"{a.notes}"</div>}
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <span style={{fontSize:13,color:T.textMuted}}>Status:</span>
           <select className="select" style={{fontSize:13}} value={quote.status} onChange={e=>onStatusChange(quote.id,e.target.value)}>
@@ -791,6 +823,31 @@ async function analyzeWindowPhoto(base64Image, products) {
     if (!response.ok) return null;
     return JSON.parse(text);
   } catch(e) { console.error("Edge scan error:", e); return null; }
+}
+
+// ─── FUZZY PRODUCT MATCH ─────────────────────────────────────────────────────
+// Returns { exact, best, score } where score 0-1 (1=perfect)
+function fuzzyMatch(aiType, products) {
+  if (!aiType || !products.length) return { exact: null, best: products[0], score: 0 };
+  const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const q = normalize(aiType);
+  let best = null, bestScore = 0;
+  for (const p of products) {
+    const n = normalize(p.name);
+    // Exact match
+    if (n === q) return { exact: p, best: p, score: 1 };
+    // Contains match (either direction)
+    let score = 0;
+    if (n.includes(q) || q.includes(n)) score = 0.85;
+    // Token overlap
+    const qTokens = q.split('');
+    const nTokens = n.split('');
+    const overlap = qTokens.filter(tok => tok.length > 2 && nTokens.some(nt => nt.includes(tok) || tok.includes(nt)));
+    if (overlap.length > 0) score = Math.max(score, 0.5 + (overlap.length / Math.max(qTokens.length, nTokens.length)) * 0.4);
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  // Threshold: >=0.5 is a usable suggestion, <0.5 = no confident match
+  return { exact: bestScore === 1 ? best : null, best, score: bestScore };
 }
 
 // ─── PDF GENERATOR ────────────────────────────────────────────────────────────
@@ -1010,12 +1067,23 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
   const [show,setShow] = useState(false);
   const [scanning,setScanning] = useState(false);
   const [scanResult,setScanResult] = useState(null);
+  const [scanNoMatch,setScanNoMatch] = useState(false);
   const fileRef = useRef(null);
 
   const add = () => {
-    if(editIdx!==null){const u=[...windows];u[editIdx]=form;setWindows(u);setEditIdx(null);}
-    else setWindows([...windows,{...form,id:Date.now()}]);
-    setForm(empty);setShow(false);setScanResult(null);
+    if(!form.type) return;
+    // Persist AI scan metadata so admin can see what IA detected vs what was selected
+    const aiMeta = (form._aiRawType || (scanResult && scanResult.type)) ? {
+      ai_raw_type: form._aiRawType || scanResult?.type,
+      ai_confidence: form._aiConfidence || scanResult?.confidence,
+      ai_notes: scanResult?.notes || null,
+      ai_no_match: !!form._aiNoMatch,
+      ai_custom_price: form._customPrice ? Number(form._customPrice) : null,
+    } : {};
+    const windowData = {...form, ...aiMeta, id: form.id || Date.now()};
+    if(editIdx!==null){const u=[...windows];u[editIdx]=windowData;setWindows(u);setEditIdx(null);}
+    else setWindows([...windows, windowData]);
+    setForm(empty);setShow(false);setScanResult(null);setScanNoMatch(false);
   };
 
   const handleScan = async (e) => {
@@ -1032,8 +1100,20 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
       const result = await analyzeWindowPhoto(base64, products);
       if (result) {
         setScanResult(result);
-        const matched = products.find(p => p.name.toLowerCase().includes(result.type?.toLowerCase()))?.name || products[0]?.name;
-        setForm(f => ({ ...f, type: matched, width: result.width||36, height: result.height||48 }));
+        const { exact, best, score } = fuzzyMatch(result.type, products);
+        if (exact) {
+          // Perfect match — auto-fill silently
+          setForm(f => ({ ...f, type: exact.name, width: result.width||36, height: result.height||48, _aiNoMatch: false, _aiRawType: result.type }));
+          setScanNoMatch(false);
+        } else if (best && score >= 0.5) {
+          // Close match — pre-fill with suggestion, flag for contractor review
+          setForm(f => ({ ...f, type: best.name, width: result.width||36, height: result.height||48, _aiNoMatch: true, _aiRawType: result.type, _aiScore: score, _customPrice: '' }));
+          setScanNoMatch(true);
+        } else {
+          // No good match — show all products, offer manual price
+          setForm(f => ({ ...f, type: products[0]?.name||'', width: result.width||36, height: result.height||48, _aiNoMatch: true, _aiRawType: result.type, _aiScore: score, _customPrice: '' }));
+          setScanNoMatch(true);
+        }
         setShow(true);
       }
     } catch(err) { console.error('Scan error:', err); }
@@ -1047,16 +1127,33 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
       <p className="step-subtitle">{t('step2Sub',lang)}</p>
 
       {/* AI Scan Result Banner */}
-      {scanResult && (
+      {scanResult && !scanNoMatch && (
         <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13}}>
           <strong>{t('aiDetected',lang)}</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · {t('confidence',lang)} {scanResult.confidence}
           {scanResult.notes && <div style={{color:T.textMuted,marginTop:2}}>{scanResult.notes}</div>}
         </div>
       )}
+      {scanResult && scanNoMatch && (
+        <div style={{background:'#FFF7ED',border:`1px solid #FED7AA`,borderRadius:10,padding:'12px 14px',marginBottom:16,fontSize:13}}>
+          <div style={{fontWeight:700,color:'#C2410C',marginBottom:4}}>{t('aiNoMatch',lang)}</div>
+          <div style={{color:T.textMuted,marginBottom:6}}>{t('aiNoMatchSub',lang)}: <strong>"{scanResult.type}"</strong> {t('aiNoMatchSub2',lang)}</div>
+          {scanResult.notes && <div style={{fontSize:12,color:T.textMuted,fontStyle:'italic',marginTop:4}}>"{scanResult.notes}"</div>}
+        </div>
+      )}
 
       {windows.map((w,i)=>(
         <div className="window-item" key={w.id||i}>
-          <div><div style={{fontWeight:600,fontSize:14}}>{w.qty}× {w.type}</div><div style={{fontSize:12,color:T.textMuted}}>{w.material} · {w.color} · {w.glass} · {w.width}"×{w.height}"</div></div>
+          <div>
+            <div style={{fontWeight:600,fontSize:14,display:'flex',alignItems:'center',gap:6}}>
+              {w.qty}× {w.type}
+              {w.ai_raw_type && <span style={{fontSize:9,background:'#3B82F6',color:'white',borderRadius:8,padding:'1px 6px',fontWeight:700}}>📷 AI</span>}
+              {w.ai_no_match && w._customPrice && <span style={{fontSize:9,background:'#F97316',color:'white',borderRadius:8,padding:'1px 6px',fontWeight:700}}>✏️</span>}
+            </div>
+            <div style={{fontSize:12,color:T.textMuted}}>{w.material} · {w.color} · {w.glass} · {w.width}"×{w.height}"</div>
+            {w.ai_no_match && w.ai_raw_type && (
+              <div style={{fontSize:11,color:'#C2410C',marginTop:2}}>AI: "{w.ai_raw_type}" → {w._customPrice>0?`$${w._customPrice} custom`:w.type}</div>
+            )}
+          </div>
           <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
             <div style={{fontWeight:700,fontFamily:'DM Mono',fontSize:14}}>{fmt(calcPrice(w))}</div>
             <div style={{display:'flex',gap:6}}>
@@ -1091,8 +1188,37 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
               {scanning ? t('analyzing',lang) : t('scan',lang)}
             </button>
           </div>
-          <div className="field"><label className="label">Type</label>
-            <div className="pill-group">{products.map(p=><div key={p.id} className={`pill ${form.type===p.name?'selected':''}`} onClick={()=>setForm({...form,type:p.name})}>{p.name}</div>)}</div></div>
+          <div className="field"><label className="label">{t('windowType',lang)}</label>
+            <div className="pill-group">{products.map(p=>(
+              <div key={p.id} className={`pill ${form.type===p.name?'selected':''}`} onClick={()=>setForm({...form,type:p.name})}>
+                {p.name}
+                {form._aiNoMatch && form._aiRawType && (() => {
+                  const { best } = fuzzyMatch(form._aiRawType, products);
+                  return best?.name === p.name ? <span style={{fontSize:9,background:'#F97316',color:'white',borderRadius:8,padding:'1px 5px',marginLeft:4,fontWeight:700}}>{t('aiSuggestedBadge',lang)}</span> : null;
+                })()}
+              </div>
+            ))}</div>
+          </div>
+          {form._aiNoMatch && (
+            <div style={{background:'#FFF7ED',border:'1px solid #FED7AA',borderRadius:10,padding:'10px 12px',marginBottom:12,fontSize:12}}>
+              <div style={{fontWeight:600,color:'#C2410C',marginBottom:6}}>
+                {t('aiSuggested',lang)} {form._aiRawType}
+              </div>
+              <div style={{color:T.textMuted,marginBottom:8}}>{t('customPriceHint',lang)}:</div>
+              <input
+                className="input"
+                type="number"
+                placeholder={t('customPrice',lang)}
+                value={form._customPrice||''}
+                min={0}
+                onChange={e=>setForm({...form, _customPrice: e.target.value})}
+                style={{marginBottom:0}}
+              />
+              {form._customPrice>0 && (
+                <div style={{marginTop:6,fontSize:11,color:'#C2410C',fontWeight:600}}>{t('customPriceActive',lang)}: ${Number(form._customPrice).toLocaleString()}</div>
+              )}
+            </div>
+          )}
           <div className="row">
             <div className="col field"><label className="label">{t('material',lang)}</label><select className="select" value={form.material} onChange={e=>setForm({...form,material:e.target.value})}>{mats.map(m=><option key={m}>{m}</option>)}</select></div>
             <div className="col field"><label className="label">{t('color',lang)}</label><select className="select" value={form.color} onChange={e=>setForm({...form,color:e.target.value})}>{cols.map(c=><option key={c}>{c}</option>)}</select></div>
@@ -1108,7 +1234,7 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
             <span style={{fontWeight:700,fontFamily:'DM Mono'}}>{fmt(calcPrice(form))}</span>
           </div>
           <div style={{display:'flex',gap:10}}>
-            <button className="btn btn-secondary" style={{flex:1}} onClick={()=>{setShow(false);setEditIdx(null);setForm(empty);}}>{t('cancel',lang)}</button>
+            <button className="btn btn-secondary" style={{flex:1}} onClick={()=>{setShow(false);setEditIdx(null);setForm(empty);setScanNoMatch(false);setScanResult(null);}}>{t('cancel',lang)}</button>
             <button className="btn btn-primary" style={{flex:2}} onClick={add}>{editIdx!==null?t('save',lang):t('addWindow',lang)}</button>
           </div>
         </div>
@@ -1215,6 +1341,18 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
 
   const confirm=async()=>{
     setSaving(true);
+    // Collect AI scan notes from windows for admin visibility
+    const aiScans = windows
+      .filter(w => w.ai_raw_type)
+      .map(w => ({
+        window_type_selected: w.type,
+        ai_detected: w.ai_raw_type,
+        confidence: w.ai_confidence,
+        notes: w.ai_notes,
+        no_match: w.ai_no_match,
+        custom_price: w.ai_custom_price,
+      }));
+
     await supabase.from('quotes').insert({
       customer_name:customer.name,customer_email:customer.email,customer_phone:customer.phone,
       address:customer.address,zip:customer.zip,windows,services:lines,down_pct:downPct,total,
@@ -1223,6 +1361,7 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
       created_by_name:currentUser?.full_name||currentUser?.email||'Unknown',
       company_id:currentUser?.company_id||null,
       company_name:currentUser?.company_name||null,
+      ai_notes: aiScans.length > 0 ? aiScans : null,
     });
     setSaving(false);
     onConfirm(total);
