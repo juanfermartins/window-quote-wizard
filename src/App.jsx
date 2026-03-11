@@ -1,5 +1,274 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { supabase } from "./supabase";
+
+// ─── i18n ─────────────────────────────────────────────────────────────────────
+const LangContext = createContext({ lang: 'en', setLang: () => {} });
+const useLang = () => useContext(LangContext);
+
+const T18N = {
+  signIn:           { en: 'Sign In',            es: 'Entrar' },
+  signOut:          { en: 'Sign out',            es: 'Salir' },
+  signingIn:        { en: 'Signing in...',       es: 'Entrando...' },
+  out:              { en: 'Out',                 es: 'Salir' },
+  cancel:           { en: 'Cancel',              es: 'Cancelar' },
+  save:             { en: 'Save',                es: 'Guardar' },
+  saving:           { en: 'Saving...',           es: 'Guardando...' },
+  add:              { en: 'Add',                 es: 'Agregar' },
+  edit:             { en: 'Edit',                es: 'Editar' },
+  done:             { en: 'Done',                es: 'Listo' },
+  back:             { en: 'Back',                es: 'Atrás' },
+  continue:         { en: 'Continue',            es: 'Continuar' },
+  loading:          { en: 'Loading...',          es: 'Cargando...' },
+  noActivity:       { en: 'No activity',         es: 'Sin actividad' },
+  actions:          { en: 'Actions',             es: 'Acciones' },
+  status:           { en: 'Status',              es: 'Estado' },
+  date:             { en: 'Date',                es: 'Fecha' },
+  total:            { en: 'Total',               es: 'Total' },
+  name:             { en: 'Name',                es: 'Nombre' },
+  company:          { en: 'Company',             es: 'Empresa' },
+  contractor:       { en: 'Contractor',          es: 'Contratista' },
+  contractors:      { en: 'Contractors',         es: 'Contratistas' },
+  language:         { en: 'Language',            es: 'Idioma' },
+  required:         { en: 'Required',            es: 'Requerido' },
+  noDataYet:        { en: 'No data yet',         es: 'Sin datos aún' },
+  clickRow:         { en: 'Click any row to see full details', es: 'Haz clic en cualquier fila para ver detalles' },
+  welcomeBack:      { en: 'Welcome back',        es: 'Bienvenido' },
+  signInDesc:       { en: 'Sign in to access your account', es: 'Inicia sesión para acceder a tu cuenta' },
+  email:            { en: 'Email',               es: 'Correo' },
+  emailPH:          { en: 'you@company.com',     es: 'tu@empresa.com' },
+  password:         { en: 'Password',            es: 'Contraseña' },
+  invalidCreds:     { en: 'Invalid email or password.', es: 'Correo o contraseña incorrectos.' },
+  enterCreds:       { en: 'Enter email and password.', es: 'Ingresa correo y contraseña.' },
+  needAccess:       { en: 'Need access? Contact your administrator.', es: '¿Necesitas acceso? Contacta a tu administrador.' },
+  step1Title:       { en: 'Your Information',    es: 'Tu Información' },
+  step1Sub:         { en: "We'll use this to generate your personalized quote.", es: 'Usaremos esto para generar tu cotización personalizada.' },
+  fullName:         { en: 'Full Name',           es: 'Nombre Completo' },
+  fullNamePH:       { en: 'Jane Smith',          es: 'Ana García' },
+  emailAddress:     { en: 'Email Address',       es: 'Correo Electrónico' },
+  phoneNumber:      { en: 'Phone Number',        es: 'Teléfono' },
+  phonePH:          { en: '(305) 555-0123',      es: '(305) 555-0123' },
+  propertyAddr:     { en: 'Property Address',    es: 'Dirección del Inmueble' },
+  addrPH:           { en: '123 Main Street',     es: 'Calle Principal 123' },
+  zipCode:          { en: 'ZIP Code',            es: 'Código Postal' },
+  step2Title:       { en: 'Windows',             es: 'Ventanas' },
+  step2Sub:         { en: 'Configure each window for accurate pricing.', es: 'Configura cada ventana para un precio exacto.' },
+  addWindow:        { en: 'Add Window',          es: 'Agregar Ventana' },
+  scanPhoto:        { en: '📷 Scan Photo',        es: '📷 Escanear Foto' },
+  analyzing:        { en: '🔍 Analyzing...',      es: '🔍 Analizando...' },
+  scan:             { en: '📷 Scan',             es: '📷 Escanear' },
+  aiDetected:       { en: '📷 AI detected:',     es: '📷 IA detectó:' },
+  confidence:       { en: 'Confidence:',         es: 'Confianza:' },
+  windowType:       { en: 'Type',                es: 'Tipo' },
+  material:         { en: 'Material',            es: 'Material' },
+  color:            { en: 'Color',               es: 'Color' },
+  glass:            { en: 'Glass',               es: 'Vidrio' },
+  widthIn:          { en: 'Width"',              es: 'Ancho"' },
+  heightIn:         { en: 'Height"',             es: 'Alto"' },
+  qty:              { en: 'Qty',                 es: 'Cant.' },
+  estimated:        { en: 'Estimated',           es: 'Estimado' },
+  editWindow:       { en: 'Edit Window',         es: 'Editar Ventana' },
+  newWindow:        { en: 'New Window',          es: 'Nueva Ventana' },
+  addAtLeastOne:    { en: 'Add at least one window.', es: 'Agrega al menos una ventana.' },
+  step3Title:       { en: 'Services',            es: 'Servicios' },
+  step3Sub:         { en: 'Add any additional services to your project.', es: 'Agrega servicios adicionales a tu proyecto.' },
+  rulesFor:         { en: 'Rules for',           es: 'Reglas para' },
+  permitReq:        { en: '⚠ Permit Required',   es: '⚠ Permiso Requerido' },
+  hurricaneZone:    { en: '🌀 Hurricane Zone',    es: '🌀 Zona de Huracanes' },
+  inspectionNeeded: { en: '🔍 Inspection Needed', es: '🔍 Inspección Requerida' },
+  standardZone:     { en: '✓ Standard zone',     es: '✓ Zona estándar' },
+  perWindow:        { en: '/window',             es: '/ventana' },
+  flat:             { en: 'flat',                es: 'fijo' },
+  included:         { en: 'Included',            es: 'Incluido' },
+  step4Title:       { en: 'Price Summary',       es: 'Resumen de Precio' },
+  step4Sub:         { en: 'Review your quote breakdown.', es: 'Revisa el desglose de tu cotización.' },
+  windows:          { en: 'Windows',             es: 'Ventanas' },
+  tax:              { en: 'Tax',                 es: 'Impuesto' },
+  downPayment:      { en: 'Down Payment',        es: 'Pago Inicial' },
+  reviewQuote:      { en: 'Review Quote',        es: 'Revisar Cotización' },
+  step5Title:       { en: 'Review & Confirm',    es: 'Revisar y Confirmar' },
+  step5Sub:         { en: 'Verify everything looks correct.', es: 'Verifica que todo esté correcto.' },
+  customer:         { en: 'Customer',            es: 'Cliente' },
+  termsCheck:       { en: 'I agree to the Terms & Conditions', es: 'Acepto los Términos y Condiciones' },
+  termsDesc:        { en: 'Accept service agreement, warranty, and payment schedule.', es: 'Acepto el contrato de servicio, garantía y calendario de pagos.' },
+  generateContract: { en: 'Generate Contract',   es: 'Generar Contrato' },
+  checking:         { en: 'Checking...',         es: 'Verificando...' },
+  reviewContract:   { en: 'Review Contract',     es: 'Revisar Contrato' },
+  reviewContractSub:{ en: 'Read carefully before signing.', es: 'Lee con atención antes de firmar.' },
+  windowsUnits:     { en: 'units',               es: 'unidades' },
+  services:         { en: 'Services',            es: 'Servicios' },
+  contractTotal:    { en: 'Contract Total',      es: 'Total del Contrato' },
+  balanceDue:       { en: 'Balance Due on Completion', es: 'Saldo al Terminar la Obra' },
+  termsNote:        { en: 'By signing below, customer agrees to the terms of this installation contract, authorizes the down payment, and acknowledges the scope of work described above.', es: 'Al firmar, el cliente acepta los términos de este contrato de instalación, autoriza el pago inicial y reconoce el alcance del trabajo descrito.' },
+  signContract:     { en: '✍️ Sign Contract',    es: '✍️ Firmar Contrato' },
+  signTitle:        { en: 'Sign Contract',       es: 'Firmar Contrato' },
+  signSub:          { en: 'Draw your signature to authorize the contract and deposit of', es: 'Dibuja tu firma para autorizar el contrato y depósito de' },
+  signHint:         { en: 'Sign here with finger or mouse', es: 'Firma aquí con el dedo o el ratón' },
+  clear:            { en: 'Clear',               es: 'Limpiar' },
+  sigCaptured:      { en: '✅ Signature captured — proceed to payment', es: '✅ Firma capturada — procede al pago' },
+  proceedPayment:   { en: 'Proceed to Payment →', es: 'Proceder al Pago →' },
+  payDeposit:       { en: 'Pay Deposit',         es: 'Pagar Depósito' },
+  payDepositSub:    { en: 'Contract signed ✅ — complete the down payment to confirm the project.', es: 'Contrato firmado ✅ — completa el pago inicial para confirmar el proyecto.' },
+  confirmPayment:   { en: 'Confirm Payment',     es: 'Confirmar Pago' },
+  processing:       { en: 'Processing...',       es: 'Procesando...' },
+  paymentConfirmedTitle: { en: 'Payment Confirmed!', es: '¡Pago Confirmado!' },
+  depositOf:        { en: 'Deposit of',          es: 'Depósito de' },
+  received:         { en: 'received.',           es: 'recibido.' },
+  paymentReceipt:   { en: 'PAYMENT RECEIPT',     es: 'RECIBO DE PAGO' },
+  reference:        { en: 'Reference',           es: 'Referencia' },
+  balanceDueComp:   { en: 'Balance Due on Completion', es: 'Saldo al Terminar' },
+  customerSig:      { en: 'Customer Signature',  es: 'Firma del Cliente' },
+  contractSentTo:   { en: 'Contract sent to',    es: 'Contrato enviado a' },
+  pdf:              { en: 'PDF',                 es: 'PDF' },
+  emailBtn:         { en: 'Email',               es: 'Email' },
+  sending:          { en: '📤 Sending...',        es: '📤 Enviando...' },
+  sent:             { en: '✅ Sent',             es: '✅ Enviado' },
+  newQuote:         { en: '＋ New Quote',         es: '＋ Nueva Cotización' },
+  failedSend:       { en: 'Failed to send. Check Resend configuration.', es: 'Error al enviar. Revisa la configuración de Resend.' },
+  left:             { en: 'left',                es: 'restantes' },
+  quoteLimitTitle:  { en: 'Quote Limit Reached', es: 'Límite de Cotizaciones Alcanzado' },
+  quoteLimitMsg:    { en: "You've used all",     es: 'Has usado todas las' },
+  quoteLimitMsg2:   { en: 'quotes in your',      es: 'cotizaciones de tu plan' },
+  quoteLimitMsg3:   { en: 'plan.',               es: '.' },
+  overageRate:      { en: 'Overage rate:',       es: 'Tarifa adicional:' },
+  overageContact:   { en: 'Contact your admin to upgrade.', es: 'Contacta a tu admin para mejorar el plan.' },
+  close:            { en: 'Close',               es: 'Cerrar' },
+  quotes:           { en: 'Quotes',              es: 'Cotizaciones' },
+  revenue:          { en: 'Revenue',             es: 'Ingresos' },
+  billing:          { en: 'Billing',             es: 'Facturación' },
+  plan:             { en: 'Plan',                es: 'Plan' },
+  used:             { en: 'Used',                es: 'Usadas' },
+  remaining:        { en: 'Remaining',           es: 'Restantes' },
+  lastActivity:     { en: 'Last Activity',       es: 'Última Actividad' },
+  noPlan:           { en: 'No Plan',             es: 'Sin Plan' },
+  noPlanWarn:       { en: "⚠ No plan — can't create quotes", es: '⚠ Sin plan — no puede cotizar' },
+  lowQuotes:        { en: '⚠ Low on quotes',     es: '⚠ Pocas cotizaciones' },
+  assignPlan:       { en: '🚀 Assign Plan',       es: '🚀 Asignar Plan' },
+  addQuotes:        { en: '+ Add Quotes',         es: '+ Agregar Cotizaciones' },
+  resetPW:          { en: '🔑 Reset PW',          es: '🔑 Reset PW' },
+  myTeam:           { en: '👥 My Team',           es: '👥 Mi Equipo' },
+  allQuotesTab:     { en: '📋 Quotes',            es: '📋 Cotizaciones' },
+  billingTab:       { en: '💳 Billing',           es: '💳 Facturación' },
+  catalogTab:       { en: '🪟 My Catalog',        es: '🪟 Mi Catálogo' },
+  dashboardTab:     { en: '📊 Dashboard',         es: '📊 Dashboard' },
+  allQuotesTitle:   { en: 'All Quotes',           es: 'Todas las Cotizaciones' },
+  billingHistory:   { en: 'Billing History',      es: 'Historial de Facturación' },
+  totalSpent:       { en: 'Total spent:',         es: 'Total gastado:' },
+  noTransactions:   { en: 'No transactions yet',  es: 'Sin transacciones aún' },
+  purchasesHere:    { en: 'Purchases will appear here', es: 'Las compras aparecerán aquí' },
+  mockWarning2:     { en: 'will be real Stripe charges once payments are connected.', es: 'serán cobros reales de Stripe cuando se conecte.' },
+  customCatalog:    { en: 'Your custom catalog',  es: 'Tu catálogo personalizado' },
+  customCatalogDesc:{ en: '— products you add here override global products of the same name for your contractors only.', es: '— los productos que agregues aquí reemplazan los globales del mismo nombre solo para tus contratistas.' },
+  noContractors:    { en: 'No contractors yet. Ask your admin to add team members.', es: 'Sin contratistas aún. Pide a tu admin que agregue miembros.' },
+  companies:        { en: 'Companies',           es: 'Empresas' },
+  companiesTab:     { en: '🏢 Companies',         es: '🏢 Empresas' },
+  contractorsTab:   { en: '👥 Contractors',       es: '👥 Contratistas' },
+  quotesTab:        { en: '📋 Quotes',            es: '📋 Cotizaciones' },
+  superBillingTab:  { en: '💰 Billing',           es: '💰 Facturación' },
+  productsTab:      { en: '🪟 Products',          es: '🪟 Productos' },
+  citiesTab:        { en: '🗺 Cities',            es: '🗺 Ciudades' },
+  superAdminDesc:   { en: 'Super Admin — full system access', es: 'Super Admin — acceso total al sistema' },
+  viewing:          { en: 'Viewing:',             es: 'Viendo:' },
+  showAll:          { en: '✕ Show all',           es: '✕ Ver todo' },
+  noCompanies:      { en: 'No companies yet. Add your first client.', es: 'Sin empresas aún. Agrega tu primer cliente.' },
+  noContractorsYet: { en: 'No contractors yet',   es: 'Sin contratistas aún' },
+  noQuotesYet:      { en: 'No quotes yet',        es: 'Sin cotizaciones aún' },
+  addCompany:       { en: 'Add Company',          es: 'Agregar Empresa' },
+  editCompany:      { en: 'Edit Company',         es: 'Editar Empresa' },
+  companyName:      { en: 'Company Name',         es: 'Nombre de la Empresa' },
+  phone:            { en: 'Phone',                es: 'Teléfono' },
+  address:          { en: 'Address',              es: 'Dirección' },
+  allContractors:   { en: 'All Contractors',      es: 'Todos los Contratistas' },
+  role:             { en: 'Role',                 es: 'Rol' },
+  assignPlanCol:    { en: 'Assign Plan',          es: 'Asignar Plan' },
+  totalQuotes:      { en: 'Total Quotes',         es: 'Total Cotizaciones' },
+  revenuePaid:      { en: 'Revenue (Paid)',        es: 'Ingresos (Pagadas)' },
+  closeRate:        { en: 'Close Rate',           es: 'Tasa de Cierre' },
+  avgQuoteValue:    { en: 'Avg Quote Value',       es: 'Valor Prom. Cotización' },
+  activeContractors:{ en: 'Active Contractors',   es: 'Contratistas Activos' },
+  monthlyTrend:     { en: '📅 Quotes per month (last 6 months)', es: '📅 Cotizaciones por mes (últimos 6 meses)' },
+  contractorPerf:   { en: '👷 Performance by contractor', es: '👷 Rendimiento por contratista' },
+  ranking:          { en: '🏆 Contractor Ranking', es: '🏆 Ranking de Contratistas' },
+  signed:           { en: 'Signed',               es: 'Firmadas' },
+  paid:             { en: 'Paid',                 es: 'Pagadas' },
+  avgTicket:        { en: 'Avg Ticket',           es: 'Ticket Prom.' },
+  avgTimeSign:      { en: 'Avg Time to Sign',     es: 'Tiempo Prom. a Firma' },
+  noName:           { en: 'No name',              es: 'Sin nombre' },
+  days:             { en: 'days',                 es: 'días' },
+  detailQuotes:     { en: '📋 Quote Detail',       es: '📋 Detalle de Cotizaciones' },
+  allContractorsF:  { en: '👷 All contractors',    es: '👷 Todos los contratistas' },
+  allStatuses:      { en: '🏷 All statuses',       es: '🏷 Todos los estados' },
+  allMonths:        { en: '📅 All months',         es: '📅 Todos los meses' },
+  newestFirst:      { en: '↓ Newest',             es: '↓ Más reciente' },
+  oldestFirst:      { en: '↑ Oldest',             es: '↑ Más antiguo' },
+  highestValue:     { en: '↓ Highest value',       es: '↓ Mayor valor' },
+  lowestValue:      { en: '↑ Lowest value',        es: '↑ Menor valor' },
+  deposit:          { en: 'Deposit',              es: 'Depósito' },
+  daysSinceCol:     { en: 'Days since quote',     es: 'Días desde cotiz.' },
+  noQuotesFilter:   { en: 'No quotes match these filters', es: 'Sin cotizaciones con estos filtros' },
+  quotesCount:      { en: 'quotes · Total:',      es: 'cotizaciones · Total:' },
+  resetPWTitle:     { en: '🔑 Reset Password',    es: '🔑 Restablecer Contraseña' },
+  resetPWMsg:       { en: 'A password reset email will be sent to', es: 'Se enviará un correo de restablecimiento a' },
+  resetPWMsg2:      { en: 'The contractor will receive a link to set a new password.', es: 'El contratista recibirá un enlace para establecer una nueva contraseña.' },
+  resetEmailSent:   { en: '✅ Reset email sent to', es: '✅ Correo enviado a' },
+  sendResetEmail:   { en: '📧 Send Reset Email',   es: '📧 Enviar Correo de Reset' },
+  sending2:         { en: 'Sending...',            es: 'Enviando...' },
+  editNameTitle:    { en: 'Edit Contractor Name',  es: 'Editar Nombre del Contratista' },
+  products:         { en: 'Products',             es: 'Productos' },
+  addProduct:       { en: 'Add Product',          es: 'Agregar Producto' },
+  productName:      { en: 'Product Name',         es: 'Nombre del Producto' },
+  basePrice:        { en: 'Base Price ($)',        es: 'Precio Base ($)' },
+  scopeLabel:       { en: 'Assign To',            es: 'Asignar A' },
+  globalScope:      { en: '🌐 Global (all companies)', es: '🌐 Global (todas las empresas)' },
+  deactivateConfirm:{ en: 'Deactivate this product?', es: '¿Desactivar este producto?' },
+  noProducts:       { en: 'No products found',    es: 'Sin productos' },
+  globalDesc:       { en: "Global products appear in every company's Wizard. Company products override globals of the same name for that company only.", es: 'Los productos globales aparecen en el Wizard de todas las empresas. Los de empresa reemplazan los globales del mismo nombre solo para esa empresa.' },
+  editProduct:      { en: 'Edit Product',         es: 'Editar Producto' },
+  scopeHint:        { en: "Global products appear for everyone. Company products only appear for that company's contractors.", es: 'Los productos globales aparecen para todos. Los de empresa solo para los contratistas de esa empresa.' },
+  cityRules:        { en: 'City Rules',           es: 'Reglas de Ciudad' },
+  addZip:           { en: 'Add ZIP',              es: 'Agregar ZIP' },
+  zip:              { en: 'ZIP',                  es: 'ZIP' },
+  city:             { en: 'City',                 es: 'Ciudad' },
+  permit:           { en: 'Permit',               es: 'Permiso' },
+  hurricane:        { en: 'Hurricane',            es: 'Huracán' },
+  permitCost:       { en: 'Permit $',             es: 'Costo Permiso $' },
+  county:           { en: 'County',               es: 'Condado' },
+  permitRequired:   { en: 'Permit Required',      es: 'Permiso Requerido' },
+  hurricaneZoneChk: { en: 'Hurricane Zone',       es: 'Zona de Huracanes' },
+  inspectionReq:    { en: 'Inspection Required',  es: 'Inspección Requerida' },
+  editCityRule:     { en: 'Edit City Rule',        es: 'Editar Regla de Ciudad' },
+  addCityRule:      { en: 'Add City Rule',         es: 'Agregar Regla de Ciudad' },
+  totalRevenue:     { en: 'Total Revenue',         es: 'Ingresos Totales' },
+  transactions:     { en: 'Transactions',          es: 'Transacciones' },
+  mockPending:      { en: 'Mock (pending Stripe)', es: 'Mock (pendiente Stripe)' },
+  realPayments:     { en: 'Real Payments',         es: 'Pagos Reales' },
+  byCompany:        { en: 'By Company',            es: 'Por Empresa' },
+  theyAppear:       { en: "They'll appear here as companies purchase quotes", es: 'Aparecerán aquí cuando las empresas compren cotizaciones' },
+  mockOnce:         { en: 'recorded. Once Stripe is connected, these will become real charges automatically.', es: 'registradas. Cuando Stripe esté conectado, se convertirán en cobros reales automáticamente.' },
+  mockCount:        { en: 'mock transaction',  es: 'transacción mock' },
+  mockCountP:       { en: 'mock transactions', es: 'transacciones mock' },
+  addQuotesFor:     { en: 'Add Quotes for',        es: 'Agregar Cotizaciones para' },
+  buyPack:          { en: '🎁 Buy Quote Pack',      es: '🎁 Comprar Paquete' },
+  upgradePlan:      { en: '⬆️ Upgrade Plan',        es: '⬆️ Mejorar Plan' },
+  choosePack:       { en: 'Choose a Pack',          es: 'Elige un Paquete' },
+  quotesWord:       { en: 'quotes',                 es: 'cotizaciones' },
+  upgradeTo:        { en: 'Upgrade To',             es: 'Mejorar A' },
+  alreadyHighest:   { en: '✓ Already on the highest plan (Enterprise)', es: '✓ Ya está en el plan más alto (Enterprise)' },
+  noHigherPlans:    { en: 'No higher plans available.', es: 'No hay planes superiores disponibles.' },
+  unlimited:        { en: 'Unlimited',              es: 'Ilimitadas' },
+  reviewConfirm:    { en: 'Review & Confirm →',     es: 'Revisar y Confirmar →' },
+  confirmPurchase:  { en: 'Confirm Purchase',        es: 'Confirmar Compra' },
+  from:             { en: 'From',                   es: 'Desde' },
+  to:               { en: 'To',                     es: 'Hasta' },
+  mockMode:         { en: '💳 Mock mode — no real charge. This transaction will be recorded for when Stripe is connected.', es: '💳 Modo mock — sin cobro real. Esta transacción se registrará para cuando Stripe esté conectado.' },
+  packAdded:        { en: 'Quotes Added!',           es: '¡Cotizaciones Agregadas!' },
+  planUpgraded:     { en: 'Plan Upgraded!',          es: '¡Plan Mejorado!' },
+  canCreateMore:    { en: 'can now create more quotes.', es: 'ahora puede crear más cotizaciones.' },
+  mockPayment:      { en: '💳 Mock payment',          es: '💳 Pago mock' },
+  recorded:         { en: 'recorded. Connect Stripe to charge real cards.', es: 'registrado. Conecta Stripe para cobrar tarjetas reales.' },
+};
+
+const t = (key, lang) => T18N[key]?.[lang] ?? T18N[key]?.en ?? key;
+
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const RESEND_KEY = import.meta.env.VITE_RESEND_KEY;
@@ -169,7 +438,7 @@ const RoleBadge = ({ role }) => {
 };
 
 // ─── LOADING / TOAST ──────────────────────────────────────────────────────────
-const LoadingScreen = () => <div className="loading"><div className="spinner" style={{width:32,height:32}}/><span>Loading...</span></div>;
+const LoadingScreen = () => { const { lang } = useLang(); return <div className="loading"><div className="spinner" style={{width:32,height:32}}/><span>{t('loading', lang)}</span></div>; };
 
 function Toast({ message, type="default", onClose }) {
   useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
@@ -333,34 +602,59 @@ function useSubscription(userId) {
 }
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
+
+// ─── LANG TOGGLE ─────────────────────────────────────────────────────────────
+function LangToggle({ style = {} }) {
+  const { lang, setLang } = useLang();
+  return (
+    <div style={{ display: 'inline-flex', background: 'rgba(0,0,0,0.06)', borderRadius: 20, padding: 3, gap: 2, ...style }}>
+      {['en', 'es'].map(l => (
+        <button key={l} onClick={() => setLang(l)} style={{
+          padding: '4px 12px', borderRadius: 16, border: 'none', cursor: 'pointer',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+          background: lang === l ? '#1A1A1A' : 'transparent',
+          color: lang === l ? 'white' : '#6B6863',
+          transition: 'all 0.15s',
+        }}>
+          {l === 'en' ? '🇺🇸 EN' : '🇪🇸 ES'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin }) {
+  const { lang } = useLang();
   const [email,setEmail] = useState('');
   const [pw,setPw] = useState('');
   const [busy,setBusy] = useState(false);
   const [err,setErr] = useState('');
 
   const go = async () => {
-    if(!email||!pw){setErr('Enter email and password.');return;}
+    if(!email||!pw){setErr(t('enterCreds',lang));return;}
     setBusy(true); setErr('');
     const e = await onLogin(email,pw);
-    if(e) setErr('Invalid email or password.');
+    if(e) setErr(t('invalidCreds',lang));
     setBusy(false);
   };
 
   return (
     <div className="login-shell">
       <div className="login-card fade-up">
-        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:32}}>
-          <div className="logo-icon" style={{width:40,height:40,fontSize:18}}><Icon name="window" size={20}/></div>
-          <div><div style={{fontWeight:800,fontSize:17}}>WindowQuote</div><div style={{fontSize:12,color:T.textMuted}}>Professional quoting platform</div></div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div className="logo-icon" style={{width:40,height:40,fontSize:18}}><Icon name="window" size={20}/></div>
+            <div><div style={{fontWeight:800,fontSize:17}}>WindowQuote</div><div style={{fontSize:12,color:T.textMuted}}>Professional quoting platform</div></div>
+          </div>
+          <LangToggle/>
         </div>
-        <div style={{fontWeight:700,fontSize:22,letterSpacing:-0.5,marginBottom:4}}>Welcome back</div>
-        <div style={{fontSize:13,color:T.textMuted,marginBottom:24}}>Sign in to access your account</div>
+        <div style={{fontWeight:700,fontSize:22,letterSpacing:-0.5,marginBottom:4}}>{t('welcomeBack',lang)}</div>
+        <div style={{fontSize:13,color:T.textMuted,marginBottom:24}}>{t('signInDesc',lang)}</div>
         {err&&<div style={{background:T.dangerLight,border:'1px solid #FCA5A5',borderRadius:10,padding:'10px 14px',fontSize:13,color:T.danger,marginBottom:16}}>{err}</div>}
-        <div className="field"><label className="label">Email</label><input className="input" type="email" placeholder="you@company.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()}/></div>
-        <div className="field"><label className="label">Password</label><input className="input" type="password" placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()}/></div>
-        <button className="btn btn-primary btn-full" style={{marginTop:8}} disabled={busy} onClick={go}>{busy?'Signing in...':'Sign In'}</button>
-        <div style={{textAlign:'center',marginTop:20,fontSize:12,color:T.textLight}}>Need access? Contact your administrator.</div>
+        <div className="field"><label className="label">{t('email',lang)}</label><input className="input" type="email" placeholder={t('emailPH',lang)} value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()}/></div>
+        <div className="field"><label className="label">{t('password',lang)}</label><input className="input" type="password" placeholder="••••••••" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&go()}/></div>
+        <button className="btn btn-primary btn-full" style={{marginTop:8}} disabled={busy} onClick={go}>{busy?t('signingIn',lang):t('signIn',lang)}</button>
+        <div style={{textAlign:'center',marginTop:20,fontSize:12,color:T.textLight}}>{t('needAccess',lang)}</div>
       </div>
     </div>
   );
@@ -368,13 +662,14 @@ function LoginScreen({ onLogin }) {
 
 // ─── QUOTA BADGE ──────────────────────────────────────────────────────────────
 function QuotaBadge({ sub, plan, pct, color }) {
+  const { lang } = useLang();
   if (!sub||!plan) return null;
   const rem = plan.quote_limit===-1?'∞':Math.max(0,plan.quote_limit-(sub.quotes_used||0));
   const low = pct()>=80;
   return (
     <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',background:low?T.dangerLight:T.surfaceAlt,borderRadius:8,border:`1px solid ${low?'#FCA5A5':T.border}`}}>
       <span style={{fontSize:12,fontWeight:700,color:low?T.danger:T.text}}>{rem}</span>
-      <span style={{fontSize:11,color:T.textMuted}}>left</span>
+      <span style={{fontSize:11,color:T.textMuted}}>{t('left',lang)}</span>
       <div style={{width:32,height:4,background:T.border,borderRadius:2,overflow:'hidden'}}>
         <div className={`quota-fill ${color()}`} style={{width:`${pct()}%`,height:'100%'}}/>
       </div>
@@ -384,14 +679,15 @@ function QuotaBadge({ sub, plan, pct, color }) {
 
 // ─── NO QUOTA MODAL ───────────────────────────────────────────────────────────
 function NoQuotaModal({ plan, onClose }) {
+  const { lang } = useLang();
   return (
     <div className="modal-overlay">
       <div className="modal" style={{textAlign:'center'}}>
         <div style={{fontSize:48,marginBottom:16}}>🚫</div>
-        <h2 style={{fontWeight:800,fontSize:20,marginBottom:8}}>Quote Limit Reached</h2>
-        <p style={{fontSize:14,color:T.textMuted,marginBottom:20}}>You've used all <strong>{plan?.quote_limit}</strong> quotes in your <strong>{plan?.name}</strong> plan.</p>
-        {plan?.overage_price>0&&<div className="info-box"><Icon name="info" size={15}/><span>Overage rate: <strong>${plan.overage_price}/quote</strong>. Contact your admin to upgrade.</span></div>}
-        <button className="btn btn-secondary btn-full" onClick={onClose}>Close</button>
+        <h2 style={{fontWeight:800,fontSize:20,marginBottom:8}}>{t('quoteLimitTitle',lang)}</h2>
+        <p style={{fontSize:14,color:T.textMuted,marginBottom:20}}>{t('quoteLimitMsg',lang)} <strong>{plan?.quote_limit}</strong> {t('quoteLimitMsg2',lang)} <strong>{plan?.name}</strong>{t('quoteLimitMsg3',lang)}</p>
+        {plan?.overage_price>0&&<div className="info-box"><Icon name="info" size={15}/><span>{t('overageRate',lang)} <strong>${plan.overage_price}/quote</strong>. {t('overageContact',lang)}</span></div>}
+        <button className="btn btn-secondary btn-full" onClick={onClose}>{t('close',lang)}</button>
       </div>
     </div>
   );
@@ -456,21 +752,23 @@ function QuoteDetailModal({ quote, onClose, onStatusChange }) {
 
 // ─── WIZARD STEPS ─────────────────────────────────────────────────────────────
 function Step1({ data, onChange, errors }) {
+  const { lang } = useLang();
+  const fields = [
+    {key:"name",   label:t('fullName',lang),    placeholder:t('fullNamePH',lang), type:"text"},
+    {key:"email",  label:t('emailAddress',lang), placeholder:t('emailPH',lang),   type:"email"},
+    {key:"phone",  label:t('phoneNumber',lang),  placeholder:t('phonePH',lang),   type:"tel"},
+    {key:"address",label:t('propertyAddr',lang), placeholder:t('addrPH',lang),    type:"text"},
+    {key:"zip",    label:t('zipCode',lang),       placeholder:"33101",             type:"text"},
+  ];
   return (
     <div className="step-content fade-up">
-      <h2 className="step-title">Your Information</h2>
-      <p className="step-subtitle">We'll use this to generate your personalized quote.</p>
-      {[
-        {key:"name",label:"Full Name",placeholder:"Jane Smith",type:"text"},
-        {key:"email",label:"Email Address",placeholder:"jane@email.com",type:"email"},
-        {key:"phone",label:"Phone Number",placeholder:"(305) 555-0123",type:"tel"},
-        {key:"address",label:"Property Address",placeholder:"123 Main Street",type:"text"},
-        {key:"zip",label:"ZIP Code",placeholder:"33101",type:"text"},
-      ].map(f=>(
+      <h2 className="step-title">{t('step1Title',lang)}</h2>
+      <p className="step-subtitle">{t('step1Sub',lang)}</p>
+      {fields.map(f=>(
         <div className="field" key={f.key}>
           <label className="label">{f.label}</label>
           <input className={`input ${errors[f.key]?'error':''}`} type={f.type} placeholder={f.placeholder} value={data[f.key]||""} onChange={e=>onChange(f.key,e.target.value)}/>
-          {errors[f.key]&&<div style={{fontSize:11,color:T.danger,marginTop:4}}>{errors[f.key]}</div>}
+          {errors[f.key]&&<div style={{fontSize:11,color:T.danger,marginTop:4}}>{t('required',lang)}</div>}
         </div>
       ))}
     </div>
@@ -629,6 +927,7 @@ async function sendContractEmail({ to, customerName, contractHTML, company }) {
 
 // ─── RESET PASSWORD MODAL ─────────────────────────────────────────────────────
 function ResetPasswordModal({ contractor, onClose, onSuccess }) {
+  const { lang } = useLang();
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const email = contractor.email || contractor.user_email || '';
@@ -645,20 +944,20 @@ function ResetPasswordModal({ contractor, onClose, onSuccess }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()} style={{maxWidth:360}}>
-        <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>🔑 Reset Password</div>
+        <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>{t('resetPWTitle',lang)}</div>
         <p style={{fontSize:13,color:T.textMuted,marginBottom:16}}>
-          A password reset email will be sent to <strong>{email}</strong>.<br/>
-          The contractor will receive a link to set a new password.
+          {t('resetPWMsg',lang)} <strong>{email}</strong>.<br/>
+          {t('resetPWMsg2',lang)}
         </p>
         {sent && (
           <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>
-            ✅ Reset email sent to {email}
+            {t('resetEmailSent',lang)} {email}
           </div>
         )}
         <div style={{display:'flex',gap:10}}>
-          <button className="btn btn-secondary" style={{flex:1}} onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" style={{flex:1}} onClick={onClose}>{t('cancel',lang)}</button>
           <button className="btn btn-primary" style={{flex:2}} disabled={sending||sent} onClick={send}>
-            {sending ? 'Sending...' : sent ? '✅ Sent' : '📧 Send Reset Email'}
+            {sending ? t('sending2',lang) : sent ? t('sent',lang) : t('sendResetEmail',lang)}
           </button>
         </div>
       </div>
@@ -668,6 +967,7 @@ function ResetPasswordModal({ contractor, onClose, onSuccess }) {
 
 // ─── EDIT CONTRACTOR NAME MODAL ───────────────────────────────────────────────
 function EditNameModal({ contractor, onClose, onSave }) {
+  const { lang } = useLang();
   const [name, setName] = useState(contractor.full_name || '');
   const [saving, setSaving] = useState(false);
 
@@ -683,16 +983,16 @@ function EditNameModal({ contractor, onClose, onSave }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ maxWidth: 360 }}>
-        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>Edit Contractor Name</div>
+        <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>{t('editNameTitle',lang)}</div>
         <div className="field">
           <label className="label">Full Name</label>
           <input className="input" value={name} onChange={e => setName(e.target.value)}
             placeholder="John Smith" onKeyDown={e => e.key === 'Enter' && save()} autoFocus />
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>{t('cancel',lang)}</button>
           <button className="btn btn-primary" style={{ flex: 2 }} disabled={saving || !name.trim()} onClick={save}>
-            {saving ? 'Saving...' : <><Icon name="save" /> Save Name</>}
+            {saving ? t('saving',lang) : <><Icon name="save" /> {t('save',lang)}</>}
           </button>
         </div>
       </div>
@@ -700,6 +1000,7 @@ function EditNameModal({ contractor, onClose, onSave }) {
   );
 }
 function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcPrice }) {
+  const { lang } = useLang();
   const mats = Object.keys(matMult);
   const cols = Object.keys(colMult);
   const gls = Object.keys(glsMult);
@@ -742,13 +1043,13 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
 
   return (
     <div className="step-content fade-up">
-      <h2 className="step-title">Windows</h2>
-      <p className="step-subtitle">Configure each window for accurate pricing.</p>
+      <h2 className="step-title">{t('step2Title',lang)}</h2>
+      <p className="step-subtitle">{t('step2Sub',lang)}</p>
 
       {/* AI Scan Result Banner */}
       {scanResult && (
         <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13}}>
-          <strong>📷 AI detected:</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · Confidence: {scanResult.confidence}
+          <strong>{t('aiDetected',lang)}</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · {t('confidence',lang)} {scanResult.confidence}
           {scanResult.notes && <div style={{color:T.textMuted,marginTop:2}}>{scanResult.notes}</div>}
         </div>
       )}
@@ -773,42 +1074,42 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
       {!show && (
         <div style={{display:'flex',gap:10,marginBottom:4}}>
           <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setShow(true)}>
-            <Icon name="plus"/> Add Window
+            <Icon name="plus"/> {t('addWindow',lang)}
           </button>
           <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
             onClick={()=>fileRef.current?.click()} disabled={scanning}>
-            {scanning ? '🔍 Analyzing...' : '📷 Scan Photo'}
+            {scanning ? t('analyzing',lang) : t('scanPhoto',lang)}
           </button>
         </div>
       )}
       {show && (
         <div className="card fade-up">
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-            <div style={{fontWeight:700,fontSize:15}}>{editIdx!==null?"Edit Window":"New Window"}</div>
+            <div style={{fontWeight:700,fontSize:15}}>{editIdx!==null?t('editWindow',lang):t('newWindow',lang)}</div>
             <button className="btn btn-secondary btn-sm" style={{color:T.accent,borderColor:T.accent,fontSize:12}}
               onClick={()=>fileRef.current?.click()} disabled={scanning}>
-              {scanning ? '🔍 Analyzing...' : '📷 Scan'}
+              {scanning ? t('analyzing',lang) : t('scan',lang)}
             </button>
           </div>
           <div className="field"><label className="label">Type</label>
             <div className="pill-group">{products.map(p=><div key={p.id} className={`pill ${form.type===p.name?'selected':''}`} onClick={()=>setForm({...form,type:p.name})}>{p.name}</div>)}</div></div>
           <div className="row">
-            <div className="col field"><label className="label">Material</label><select className="select" value={form.material} onChange={e=>setForm({...form,material:e.target.value})}>{mats.map(m=><option key={m}>{m}</option>)}</select></div>
-            <div className="col field"><label className="label">Color</label><select className="select" value={form.color} onChange={e=>setForm({...form,color:e.target.value})}>{cols.map(c=><option key={c}>{c}</option>)}</select></div>
+            <div className="col field"><label className="label">{t('material',lang)}</label><select className="select" value={form.material} onChange={e=>setForm({...form,material:e.target.value})}>{mats.map(m=><option key={m}>{m}</option>)}</select></div>
+            <div className="col field"><label className="label">{t('color',lang)}</label><select className="select" value={form.color} onChange={e=>setForm({...form,color:e.target.value})}>{cols.map(c=><option key={c}>{c}</option>)}</select></div>
           </div>
-          <div className="field"><label className="label">Glass</label><select className="select" value={form.glass} onChange={e=>setForm({...form,glass:e.target.value})}>{gls.map(g=><option key={g}>{g}</option>)}</select></div>
+          <div className="field"><label className="label">{t('glass',lang)}</label><select className="select" value={form.glass} onChange={e=>setForm({...form,glass:e.target.value})}>{gls.map(g=><option key={g}>{g}</option>)}</select></div>
           <div className="row">
-            <div className="col field"><label className="label">Width"</label><input className="input" type="number" value={form.width} min={12} max={120} onChange={e=>setForm({...form,width:Number(e.target.value)})}/></div>
-            <div className="col field"><label className="label">Height"</label><input className="input" type="number" value={form.height} min={12} max={120} onChange={e=>setForm({...form,height:Number(e.target.value)})}/></div>
-            <div className="col field"><label className="label">Qty</label><input className="input" type="number" value={form.qty} min={1} max={50} onChange={e=>setForm({...form,qty:Number(e.target.value)})}/></div>
+            <div className="col field"><label className="label">{t('widthIn',lang)}</label><input className="input" type="number" value={form.width} min={12} max={120} onChange={e=>setForm({...form,width:Number(e.target.value)})}/></div>
+            <div className="col field"><label className="label">{t('heightIn',lang)}</label><input className="input" type="number" value={form.height} min={12} max={120} onChange={e=>setForm({...form,height:Number(e.target.value)})}/></div>
+            <div className="col field"><label className="label">{t('qty',lang)}</label><input className="input" type="number" value={form.qty} min={1} max={50} onChange={e=>setForm({...form,qty:Number(e.target.value)})}/></div>
           </div>
           <div style={{background:T.surfaceAlt,borderRadius:10,padding:'10px 14px',marginBottom:16,display:'flex',justifyContent:'space-between'}}>
-            <span style={{fontSize:13,color:T.textMuted}}>Estimated</span>
+            <span style={{fontSize:13,color:T.textMuted}}>{t('estimated',lang)}</span>
             <span style={{fontWeight:700,fontFamily:'DM Mono'}}>{fmt(calcPrice(form))}</span>
           </div>
           <div style={{display:'flex',gap:10}}>
-            <button className="btn btn-secondary" style={{flex:1}} onClick={()=>{setShow(false);setEditIdx(null);setForm(empty);}}>Cancel</button>
-            <button className="btn btn-primary" style={{flex:2}} onClick={add}>{editIdx!==null?"Save":"Add Window"}</button>
+            <button className="btn btn-secondary" style={{flex:1}} onClick={()=>{setShow(false);setEditIdx(null);setForm(empty);}}>{t('cancel',lang)}</button>
+            <button className="btn btn-primary" style={{flex:2}} onClick={add}>{editIdx!==null?t('save',lang):t('addWindow',lang)}</button>
           </div>
         </div>
       )}
@@ -817,6 +1118,7 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
 }
 
 function Step3({ selected, setSelected, zip, dbServices, cityMap }) {
+  const { lang } = useLang();
   const rules = cityMap[zip]||null;
   const icons = {Installation:"🔧",Permit:"📋","General Contractor":"👷",Disposal:"♻️"};
   useEffect(()=>{
@@ -824,30 +1126,30 @@ function Step3({ selected, setSelected, zip, dbServices, cityMap }) {
   },[zip]);
   return (
     <div className="step-content fade-up">
-      <h2 className="step-title">Services</h2>
-      <p className="step-subtitle">Add any additional services to your project.</p>
+      <h2 className="step-title">{t('step3Title',lang)}</h2>
+      <p className="step-subtitle">{t('step3Sub',lang)}</p>
       {rules&&(
         <div className="card" style={{background:T.surfaceAlt,marginBottom:20}}>
-          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><Icon name="map" size={14}/><span style={{fontWeight:700,fontSize:13}}>Rules for {rules.city}</span></div>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><Icon name="map" size={14}/><span style={{fontWeight:700,fontSize:13}}>{t('rulesFor',lang)} {rules.city}</span></div>
           <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-            {rules.permit_required&&<span className="badge badge-red">⚠ Permit Required</span>}
-            {rules.hurricane_zone&&<span className="badge badge-orange">🌀 Hurricane Zone</span>}
-            {rules.inspection_required&&<span className="badge badge-blue">🔍 Inspection Needed</span>}
-            {!rules.permit_required&&!rules.hurricane_zone&&!rules.inspection_required&&<span className="badge badge-green">✓ Standard zone</span>}
+            {rules.permit_required&&<span className="badge badge-red">{t('permitReq',lang)}</span>}
+            {rules.hurricane_zone&&<span className="badge badge-orange">{t('hurricaneZone',lang)}</span>}
+            {rules.inspection_required&&<span className="badge badge-blue">{t('inspectionNeeded',lang)}</span>}
+            {!rules.permit_required&&!rules.hurricane_zone&&!rules.inspection_required&&<span className="badge badge-green">{t('standardZone',lang)}</span>}
           </div>
         </div>
       )}
       {dbServices.map(s=>{
         const checked=selected.includes(s.id);
         const req=s.name==='Permit'&&rules?.permit_required;
-        const price=s.pricing_model==='per_window'?`$${s.price}/window`:s.price>0?`$${s.price} flat`:'Included';
+        const price=s.pricing_model==='per_window'?`$${s.price}${t('perWindow',lang)}`:s.price>0?`$${s.price} ${t('flat',lang)}`:t('included',lang);
         return(
           <div key={s.id} className={`checkbox-row ${checked?'checked':''}`} onClick={()=>!req&&setSelected(sel=>sel.includes(s.id)?sel.filter(x=>x!==s.id):[...sel,s.id])}>
             <div className={`checkbox-box ${checked?'checked':''}`}>{checked&&<Icon name="check" size={12}/>}</div>
             <div style={{flex:1}}>
               <div style={{display:'flex',alignItems:'center',gap:6}}>
                 <span className="checkbox-label">{icons[s.name]||'🔹'} {s.name}</span>
-                {req&&<span className="badge badge-red" style={{fontSize:10}}>Required</span>}
+                {req&&<span className="badge badge-red" style={{fontSize:10}}>{t('required',lang)}</span>}
               </div>
               <div className="checkbox-desc">{price} · {s.description}</div>
             </div>
@@ -859,6 +1161,7 @@ function Step3({ selected, setSelected, zip, dbServices, cityMap }) {
 }
 
 function Step4({ windows, selected, dbServices, zip, cityMap, downPct, setDownPct, calcPrice }) {
+  const { lang } = useLang();
   const rules=cityMap[zip]||null;
   const count=windows.reduce((s,w)=>s+(w.qty||1),0);
   const winTotal=windows.reduce((s,w)=>s+calcPrice(w),0);
@@ -873,16 +1176,16 @@ function Step4({ windows, selected, dbServices, zip, cityMap, downPct, setDownPc
   const total=sub+tax;
   return(
     <div className="step-content fade-up">
-      <h2 className="step-title">Price Summary</h2>
-      <p className="step-subtitle">Review your quote breakdown.</p>
+      <h2 className="step-title">{t('step4Title',lang)}</h2>
+      <p className="step-subtitle">{t('step4Sub',lang)}</p>
       <div className="card">
-        <div className="price-row"><span className="muted">Windows ({count})</span><span className="mono">{fmt(winTotal)}</span></div>
+        <div className="price-row"><span className="muted">{t('windows',lang)} ({count})</span><span className="mono">{fmt(winTotal)}</span></div>
         {lines.map((l,i)=><div key={i} className="price-row"><span className="muted">{l.label}</span><span className="mono">{fmt(l.amount)}</span></div>)}
-        <div className="price-row"><span className="muted">Tax ({(TAX*100).toFixed(0)}%)</span><span className="mono">{fmt(tax)}</span></div>
-        <div className="price-row total"><span>Total</span><span className="mono">{fmt(total)}</span></div>
+        <div className="price-row"><span className="muted">{t('tax',lang)} ({(TAX*100).toFixed(0)}%)</span><span className="mono">{fmt(tax)}</span></div>
+        <div className="price-row total"><span>{t('total',lang)}</span><span className="mono">{fmt(total)}</span></div>
       </div>
       <div className="divider"/>
-      <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>Down Payment</div>
+      <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>{t('downPayment',lang)}</div>
       <div className="dp-options">
         {[10,20,30].map(p=>(
           <div key={p} className={`dp-option ${downPct===p?'selected':''}`} onClick={()=>setDownPct(p)}>
@@ -896,6 +1199,7 @@ function Step4({ windows, selected, dbServices, zip, cityMap, downPct, setDownPc
 }
 
 function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct, calcPrice, onConfirm, currentUser }) {
+  const { lang } = useLang();
   const [agreed,setAgreed]=useState(false);
   const [saving,setSaving]=useState(false);
   const rules=cityMap[zip]||null;
@@ -926,28 +1230,28 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
 
   return(
     <div className="step-content fade-up">
-      <h2 className="step-title">Review & Confirm</h2>
-      <p className="step-subtitle">Verify everything looks correct.</p>
+      <h2 className="step-title">{t('step5Title',lang)}</h2>
+      <p className="step-subtitle">{t('step5Sub',lang)}</p>
       <div className="card-sm">
-        <div style={{fontWeight:600,fontSize:12,color:T.textMuted,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.5px'}}>Customer</div>
+        <div style={{fontWeight:600,fontSize:12,color:T.textMuted,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.5px'}}>{t('customer',lang)}</div>
         <div style={{fontWeight:600}}>{customer.name}</div>
         <div style={{fontSize:13,color:T.textMuted}}>{customer.email} · {customer.phone}</div>
         <div style={{fontSize:13,color:T.textMuted}}>{customer.address}, {customer.zip}</div>
       </div>
       <div className="card-sm">
-        <div style={{fontWeight:600,fontSize:12,color:T.textMuted,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.5px'}}>Windows</div>
+        <div style={{fontWeight:600,fontSize:12,color:T.textMuted,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.5px'}}>{t('windows',lang)}</div>
         {windows.map((w,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}><span>{w.qty}× {w.type} · {w.material}</span><span className="mono">{fmt(calcPrice(w))}</span></div>)}
       </div>
       <div className="card-sm" style={{display:'flex',justifyContent:'space-between'}}>
-        <span style={{fontWeight:600}}>Total</span>
+        <span style={{fontWeight:600}}>{t('total',lang)}</span>
         <span style={{fontWeight:800,fontFamily:'DM Mono',fontSize:18}}>{fmt(total)}</span>
       </div>
       <div className={`checkbox-row ${agreed?'checked':''}`} onClick={()=>setAgreed(!agreed)} style={{marginTop:16}}>
         <div className={`checkbox-box ${agreed?'checked':''}`}>{agreed&&<Icon name="check" size={12}/>}</div>
-        <div><div className="checkbox-label">I agree to the Terms & Conditions</div><div className="checkbox-desc">Accept service agreement, warranty, and payment schedule.</div></div>
+        <div><div className="checkbox-label">{t('termsCheck',lang)}</div><div className="checkbox-desc">{t('termsDesc',lang)}</div></div>
       </div>
       <button className="btn btn-primary btn-full" style={{marginTop:16}} disabled={!agreed||saving} onClick={confirm}>
-        {saving?"Saving...":<><Icon name="arrow" /> Generate Contract</>}
+        {saving?t('saving',lang):<><Icon name="arrow" /> {t('generateContract',lang)}</>}
       </button>
     </div>
   );
@@ -957,14 +1261,15 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
 
 // STEP A: Ver contrato (solo lectura) → firmar
 function ContractView({ customer, total, downPct, windows, serviceLines, company, contractorName, onSign }) {
+  const { lang } = useLang();
   const downAmt = Math.round(total * downPct / 100);
   const balance = total - downAmt;
   const count = windows.reduce((s,w)=>s+(w.qty||1),0);
 
   return (
     <div className="step-content fade-up">
-      <h2 className="step-title">Review Contract</h2>
-      <p className="step-subtitle">Read carefully before signing.</p>
+      <h2 className="step-title">{t('reviewContract',lang)}</h2>
+      <p className="step-subtitle">{t('reviewContractSub',lang)}</p>
 
       {/* Company header */}
       <div style={{background:T.surfaceAlt,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
@@ -975,7 +1280,7 @@ function ContractView({ customer, total, downPct, windows, serviceLines, company
 
       {/* Customer */}
       <div className="card-sm" style={{marginBottom:10}}>
-        <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Customer</div>
+        <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>{t('customer',lang)}</div>
         <div style={{fontWeight:600}}>{customer.name}</div>
         <div style={{fontSize:13,color:T.textMuted}}>{customer.email} · {customer.phone}</div>
         <div style={{fontSize:13,color:T.textMuted}}>{customer.address}, {customer.zip}</div>
@@ -983,7 +1288,7 @@ function ContractView({ customer, total, downPct, windows, serviceLines, company
 
       {/* Windows */}
       <div className="card-sm" style={{marginBottom:10}}>
-        <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Windows ({count} units)</div>
+        <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>{t('windows',lang)} ({count} {t('windowsUnits',lang)})</div>
         {windows.map((w,i)=>(
           <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'4px 0',borderBottom:`1px solid ${T.border}`}}>
             <span>{w.qty}× {w.type} · {w.material} · {w.width}"×{w.height}"</span>
@@ -994,7 +1299,7 @@ function ContractView({ customer, total, downPct, windows, serviceLines, company
       {/* Services */}
       {serviceLines.length>0&&(
         <div className="card-sm" style={{marginBottom:10}}>
-          <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Services</div>
+          <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>{t('services',lang)}</div>
           {serviceLines.map((s,i)=>(
             <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'4px 0'}}>
               <span>{s.label}</span><span className="mono">{fmt(s.amount)}</span>
@@ -1006,25 +1311,25 @@ function ContractView({ customer, total, downPct, windows, serviceLines, company
       {/* Totals */}
       <div className="card-sm" style={{marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
-          <span style={{color:T.textMuted}}>Contract Total</span>
+          <span style={{color:T.textMuted}}>{t('contractTotal',lang)}</span>
           <span style={{fontWeight:800,fontFamily:'DM Mono',fontSize:16}}>{fmt(total)}</span>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-          <span style={{color:T.success,fontWeight:600}}>Down Payment ({downPct}%)</span>
+          <span style={{color:T.success,fontWeight:600}}>{t('downPayment',lang)} ({downPct}%)</span>
           <span style={{fontWeight:700,color:T.success,fontFamily:'DM Mono'}}>{fmt(downAmt)}</span>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:13}}>
-          <span style={{color:T.textMuted}}>Balance Due on Completion</span>
+          <span style={{color:T.textMuted}}>{t('balanceDue',lang)}</span>
           <span style={{fontFamily:'DM Mono'}}>{fmt(balance)}</span>
         </div>
       </div>
 
       <div style={{fontSize:11,color:T.textMuted,marginBottom:16,lineHeight:1.6,padding:'0 4px'}}>
-        By signing below, customer agrees to the terms of this installation contract, authorizes the down payment, and acknowledges the scope of work described above.
+{t('termsNote',lang)}
       </div>
 
       <button className="btn btn-primary btn-full" onClick={onSign}>
-        ✍️ Sign Contract
+        {t('signContract',lang)}
       </button>
     </div>
   );
@@ -1032,6 +1337,7 @@ function ContractView({ customer, total, downPct, windows, serviceLines, company
 
 // STEP B: Firmar
 function SignContract({ customer, total, downPct, onPay }) {
+  const { lang } = useLang();
   const ref = useRef(null);
   const [signed, setSigned] = useState(false);
   const [drawing, setDrawing] = useState(false);
@@ -1059,8 +1365,8 @@ function SignContract({ customer, total, downPct, onPay }) {
 
   return (
     <div className="step-content fade-up">
-      <h2 className="step-title">Sign Contract</h2>
-      <p className="step-subtitle">Draw your signature to authorize the contract and deposit of <strong>{fmt(downAmt)}</strong>.</p>
+      <h2 className="step-title">{t('signTitle',lang)}</h2>
+      <p className="step-subtitle">{t('signSub',lang)} <strong>{fmt(downAmt)}</strong>.</p>
 
       <div style={{border:`2px solid ${signed?T.success:T.border}`,borderRadius:12,overflow:'hidden',background:'#FAFAF9',position:'relative',marginBottom:8,transition:'border-color 0.2s'}}>
         <canvas ref={ref} width={350} height={150}
@@ -1070,21 +1376,21 @@ function SignContract({ customer, total, downPct, onPay }) {
         />
         {!signed&&<div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',color:T.textLight,fontSize:13,pointerEvents:'none',gap:4}}>
           <span style={{fontSize:24}}>✍️</span>
-          <span>Sign here with finger or mouse</span>
+          <span>{t('signHint',lang)}</span>
         </div>}
       </div>
 
       <div style={{display:'flex',justifyContent:'space-between',marginBottom:20,alignItems:'center'}}>
         <span style={{fontSize:12,color:T.textMuted}}>{customer.name} · {new Date().toLocaleDateString()}</span>
-        <button style={{background:'none',border:'none',fontSize:12,color:T.accent,cursor:'pointer'}} onClick={clear}>Clear</button>
+        <button style={{background:'none',border:'none',fontSize:12,color:T.accent,cursor:'pointer'}} onClick={clear}>{t('clear',lang)}</button>
       </div>
 
       {signed&&<div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13,color:T.success,textAlign:'center'}}>
-        ✅ Signature captured — proceed to payment
+{t('sigCaptured',lang)}
       </div>}
 
       <button className="btn btn-primary btn-full" disabled={!signed} onClick={handlePay}>
-        💳 Proceed to Payment → {fmt(downAmt)}
+        💳 {t('proceedPayment',lang)} {fmt(downAmt)}
       </button>
     </div>
   );
@@ -1128,30 +1434,31 @@ function PayDeposit({ customer, total, downPct, windows, serviceLines, company, 
     else setEmailError("Failed to send. Check Resend configuration.");
   };
 
+  const { lang } = useLang();
   if (paid) return (
     <div className="step-content fade-up" style={{textAlign:'center',paddingTop:24}}>
       <div className="success-icon" style={{width:72,height:72,fontSize:32}}>✅</div>
-      <h2 className="step-title" style={{textAlign:'center'}}>Payment Confirmed!</h2>
-      <p className="step-subtitle" style={{textAlign:'center'}}>Deposit of <strong>{fmt(downAmt)}</strong> received.</p>
+      <h2 className="step-title" style={{textAlign:'center'}}>{t('paymentConfirmedTitle',lang)}</h2>
+      <p className="step-subtitle" style={{textAlign:'center'}}>{t('depositOf',lang)} <strong>{fmt(downAmt)}</strong> {t('received',lang)}</p>
 
       {/* Payment receipt card */}
       <div style={{background:T.successLight,border:`1.5px solid #BBF7D0`,borderRadius:14,padding:'16px',marginBottom:16,textAlign:'left'}}>
-        <div style={{fontWeight:700,fontSize:13,marginBottom:10,color:T.success}}>PAYMENT RECEIPT</div>
+        <div style={{fontWeight:700,fontSize:13,marginBottom:10,color:T.success}}>{t('paymentReceipt',lang)}</div>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
-          <span style={{color:T.textMuted}}>Reference</span><span style={{fontWeight:600,fontFamily:'DM Mono'}}>{paymentRef}</span>
+          <span style={{color:T.textMuted}}>{t('reference',lang)}</span><span style={{fontWeight:600,fontFamily:'DM Mono'}}>{paymentRef}</span>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
-          <span style={{color:T.textMuted}}>Date</span><span>{paymentDate}</span>
+          <span style={{color:T.textMuted}}>{t('date',lang)}</span><span>{paymentDate}</span>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
-          <span style={{color:T.textMuted}}>Customer</span><span style={{fontWeight:600}}>{customer.name}</span>
+          <span style={{color:T.textMuted}}>{t('customer',lang)}</span><span style={{fontWeight:600}}>{customer.name}</span>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
-          <span style={{color:T.textMuted}}>Down Payment ({downPct}%)</span>
+          <span style={{color:T.textMuted}}>{t('downPayment',lang)} ({downPct}%)</span>
           <span style={{fontWeight:800,fontFamily:'DM Mono',color:T.success}}>{fmt(downAmt)}</span>
         </div>
         <div style={{display:'flex',justifyContent:'space-between',fontSize:13,paddingTop:8,borderTop:`1px solid #BBF7D0`}}>
-          <span style={{color:T.textMuted}}>Balance Due on Completion</span>
+          <span style={{color:T.textMuted}}>{t('balanceDueComp',lang)}</span>
           <span style={{fontFamily:'DM Mono'}}>{fmt(balance)}</span>
         </div>
       </div>
@@ -1159,29 +1466,29 @@ function PayDeposit({ customer, total, downPct, windows, serviceLines, company, 
       {/* Signature preview */}
       {signature && (
         <div style={{border:`1px solid ${T.border}`,borderRadius:10,padding:'10px',marginBottom:16,background:T.surfaceAlt}}>
-          <div style={{fontSize:11,color:T.textMuted,marginBottom:6}}>Customer Signature</div>
+          <div style={{fontSize:11,color:T.textMuted,marginBottom:6}}>{t('customerSig',lang)}</div>
           <img src={signature} style={{maxHeight:60,maxWidth:'100%'}} alt="signature"/>
           <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>{customer.name} · {paymentDate}</div>
         </div>
       )}
 
-      {sent&&<div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>✅ Contract sent to {customer.email}</div>}
-      {emailError&&<div style={{background:T.dangerLight,border:`1px solid #FECACA`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.danger}}>⚠ {emailError}</div>}
+      {sent&&<div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>✅ {t('contractSentTo',lang)} {customer.email}</div>}
+      {emailError&&<div style={{background:T.dangerLight,border:`1px solid #FECACA`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.danger}}>⚠ {t('failedSend',lang)}</div>}
 
       <div style={{display:'flex',gap:10,marginBottom:10}}>
-        <button className="btn btn-secondary" style={{flex:1}} onClick={downloadPDF}><Icon name="download"/> PDF</button>
+        <button className="btn btn-secondary" style={{flex:1}} onClick={downloadPDF}><Icon name="download"/> {t('pdf',lang)}</button>
         <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}} onClick={sendEmail} disabled={sending||sent}>
-          {sending?'📤 Sending...':sent?'✅ Sent':'📧 Email'}
+          {sending?t('sending',lang):sent?t('sent',lang):`📧 ${t('emailBtn',lang)}`}
         </button>
       </div>
-      <button className="btn btn-primary btn-full" onClick={onNewQuote}>＋ New Quote</button>
+      <button className="btn btn-primary btn-full" onClick={onNewQuote}>{t('newQuote',lang)}</button>
     </div>
   );
 
   return (
     <div className="step-content fade-up">
-      <h2 className="step-title">Pay Deposit</h2>
-      <p className="step-subtitle">Contract signed ✅ — complete the down payment to confirm the project.</p>
+      <h2 className="step-title">{t('payDeposit',lang)}</h2>
+      <p className="step-subtitle">{t('payDepositSub',lang)}</p>
 
       <div className="stripe-card">
         <div style={{fontSize:11,opacity:0.6,marginBottom:12,letterSpacing:1,textTransform:'uppercase'}}>Powered by Stripe</div>
@@ -1194,7 +1501,7 @@ function PayDeposit({ customer, total, downPct, windows, serviceLines, company, 
 
       <div className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
         <div>
-          <div style={{fontWeight:600}}>Down Payment</div>
+          <div style={{fontWeight:600}}>{t('downPayment',lang)}</div>
           <div style={{fontSize:12,color:T.textMuted}}>{downPct}% of {fmt(total)}</div>
         </div>
         <div style={{fontWeight:800,fontSize:22,fontFamily:'DM Mono'}}>{fmt(downAmt)}</div>
@@ -1202,7 +1509,7 @@ function PayDeposit({ customer, total, downPct, windows, serviceLines, company, 
 
       <button className="btn btn-accent btn-full" disabled={paying}
         onClick={()=>{setPaying(true);setTimeout(()=>{setPaying(false);setPaid(true);},2500);}}>
-        {paying?'Processing...':`Confirm Payment ${fmt(downAmt)}`}
+        {paying?t('processing',lang):`${t('confirmPayment',lang)} ${fmt(downAmt)}`}
       </button>
     </div>
   );
@@ -1250,6 +1557,7 @@ function Wizard({ appData, auth }) {
   if(loading)return <LoadingScreen/>;
   const cu={id:auth.user?.id,email:auth.user?.email,full_name:auth.profile?.full_name,company_id:auth.companyId,company_name:auth.company?.name};
 
+  const { lang } = useLang();
   const resetWizard = () => { setPost(null);setStep(1);setCustomer({name:"",email:"",phone:"",address:"",zip:""});setWindows([]);setSelected([]);setSignature(null);setTotal(0); };
 
   const navBar = (
@@ -1284,7 +1592,8 @@ function Wizard({ appData, auth }) {
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <QuotaBadge sub={sub} plan={plan} pct={pct} color={color}/>
           <div className="avatar" style={{background:T.accent,width:28,height:28,fontSize:11}}>{(auth.profile?.full_name||auth.user?.email||'U').charAt(0).toUpperCase()}</div>
-          <button style={{background:'none',border:'none',fontSize:12,color:T.textMuted,cursor:'pointer'}} onClick={auth.signOut}>Out</button>
+          <LangToggle style={{marginRight:4}}/>
+          <button style={{background:'none',border:'none',fontSize:12,color:T.textMuted,cursor:'pointer'}} onClick={auth.signOut}>{t('out',lang)}</button>
         </div>
       </div>
       <div className="progress-bar"><div className="progress-fill" style={{width:`${(step/5)*100}%`}}/></div>
@@ -1327,6 +1636,7 @@ function PlanSelector({ userId, companyId, currentPlanId, onSave }) {
 
 // ─── SUPER ADMIN PANEL ────────────────────────────────────────────────────────
 function SuperAdminPanel({ appData, auth }) {
+  const { lang } = useLang();
   const [tab,setTab]=useState("companies");
   const [companies,setCompanies]=useState([]);
   const [allQuotes,setAllQuotes]=useState([]);
@@ -1393,11 +1703,11 @@ function SuperAdminPanel({ appData, auth }) {
             <span style={{fontWeight:800,fontSize:18}}>WindowQuote</span>
             <RoleBadge role="superadmin"/>
           </div>
-          <div style={{fontSize:13,color:T.textMuted}}>Super Admin — full system access</div>
+          <div style={{fontSize:13,color:T.textMuted}}>{t('superAdminDesc',lang)}</div>
         </div>
         <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
           <div style={{display:'flex',gap:10}}>
-            {[{label:"Companies",value:companies.length},{label:"Contractors",value:allUsers.filter(u=>u.role==='contractor').length},{label:"Quotes",value:allQuotes.length}].map(s=>(
+            {[{label:t('companies',lang),value:companies.length},{label:t('contractors',lang),value:allUsers.filter(u=>u.role==='contractor').length},{label:t('quotes',lang),value:allQuotes.length}].map(s=>(
               <div key={s.label} style={{textAlign:'center',padding:'8px 14px',background:T.surfaceAlt,borderRadius:10,border:`1px solid ${T.border}`}}>
                 <div style={{fontWeight:800,fontSize:18,fontFamily:'DM Mono'}}>{s.value}</div>
                 <div style={{fontSize:11,color:T.textMuted}}>{s.label}</div>
@@ -1406,21 +1716,22 @@ function SuperAdminPanel({ appData, auth }) {
           </div>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <div className="avatar" style={{background:'#7C3AED'}}>{(auth.profile?.full_name||'S').charAt(0)}</div>
-            <button className="btn btn-secondary btn-sm" onClick={auth.signOut}>Sign out</button>
+            <LangToggle style={{marginRight:4}}/>
+          <button className="btn btn-secondary btn-sm" onClick={auth.signOut}>{t('signOut',lang)}</button>
           </div>
         </div>
       </div>
 
       {selCompany&&(
         <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20,padding:'10px 14px',background:T.accentLight,borderRadius:12,border:`1px solid #BFDBFE`}}>
-          <span style={{fontSize:13,color:T.accent}}>Viewing: <strong>{selCompany.name}</strong></span>
-          <button style={{background:'none',border:'none',cursor:'pointer',color:T.accent,fontSize:12}} onClick={()=>setSelCompany(null)}>✕ Show all</button>
+          <span style={{fontSize:13,color:T.accent}}>{t('viewing',lang)} <strong>{selCompany.name}</strong></span>
+          <button style={{background:'none',border:'none',cursor:'pointer',color:T.accent,fontSize:12}} onClick={()=>setSelCompany(null)}>{t('showAll',lang)}</button>
         </div>
       )}
 
       <div className="admin-nav">
-        {[{id:"companies",label:"🏢 Companies"},{id:"contractors",label:"👥 Contractors"},{id:"quotes",label:"📋 Quotes"},{id:"billing",label:"💰 Billing"},{id:"products",label:"🪟 Products"},{id:"cities",label:"🗺 Cities"}].map(t=>(
-          <button key={t.id} className={`admin-nav-item ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id)}>{t.label}</button>
+        {[{id:"companies",label:t('companiesTab',lang)},{id:"contractors",label:t('contractorsTab',lang)},{id:"quotes",label:t('quotesTab',lang)},{id:"billing",label:t('superBillingTab',lang)},{id:"products",label:t('productsTab',lang)},{id:"cities",label:t('citiesTab',lang)}].map(tb=>(
+          <button key={tb.id} className={`admin-nav-item ${tab===tb.id?'active':''}`} onClick={()=>setTab(tb.id)}>{tb.label}</button>
         ))}
       </div>
 
@@ -1428,8 +1739,8 @@ function SuperAdminPanel({ appData, auth }) {
       {tab==="companies"&&(
         <div className="fade-up">
           <div style={{display:'flex',justifyContent:'space-between',marginBottom:20}}>
-            <h3 style={{fontWeight:700,fontSize:18}}>Companies</h3>
-            <button className="btn btn-primary btn-sm" onClick={()=>setModal({type:'company',data:{name:'',phone:'',address:''}})}><Icon name="plus"/> Add</button>
+            <h3 style={{fontWeight:700,fontSize:18}}>{t('companies',lang)}</h3>
+            <button className="btn btn-primary btn-sm" onClick={()=>setModal({type:'company',data:{name:'',phone:'',address:''}})}><Icon name="plus"/> {t('add',lang)}</button>
           </div>
           <div className="company-grid">
             {companies.map(c=>{
@@ -1450,7 +1761,7 @@ function SuperAdminPanel({ appData, auth }) {
                     </div>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
-                    {[{label:"Contractors",value:cu.filter(u=>u.role==='contractor').length},{label:"Quotes",value:cq.length},{label:"Revenue",value:fmt(rev)}].map(s=>(
+                    {[{label:t('contractors',lang),value:cu.filter(u=>u.role==='contractor').length},{label:t('quotes',lang),value:cq.length},{label:t('revenue',lang),value:fmt(rev)}].map(s=>(
                       <div key={s.label} style={{background:T.surfaceAlt,borderRadius:8,padding:'8px 10px',textAlign:'center'}}>
                         <div style={{fontWeight:700,fontSize:14,fontFamily:'DM Mono'}}>{s.value}</div>
                         <div style={{fontSize:10,color:T.textMuted}}>{s.label}</div>
@@ -1460,7 +1771,7 @@ function SuperAdminPanel({ appData, auth }) {
                 </div>
               );
             })}
-            {companies.length===0&&<div style={{color:T.textMuted,fontSize:14}}>No companies yet. Add your first client.</div>}
+            {companies.length===0&&<div style={{color:T.textMuted,fontSize:14}}>{t('noCompanies',lang)}</div>}
           </div>
         </div>
       )}
@@ -1468,10 +1779,10 @@ function SuperAdminPanel({ appData, auth }) {
       {/* CONTRACTORS */}
       {tab==="contractors"&&(
         <div className="fade-up">
-          <h3 style={{fontWeight:700,fontSize:18,marginBottom:20}}>{selCompany?`${selCompany.name} — Contractors`:'All Contractors'}</h3>
+          <h3 style={{fontWeight:700,fontSize:18,marginBottom:20}}>{selCompany?`${selCompany.name} — ${t('contractors',lang)}`:t('allContractors',lang)}</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Name</th><th>Company</th><th>Role</th><th>Plan</th><th>Used</th><th>Remaining</th><th>Assign Plan</th></tr></thead>
+              <thead><tr><th>{t('name',lang)}</th><th>{t('company',lang)}</th><th>{t('role',lang)}</th><th>{t('plan',lang)}</th><th>{t('used',lang)}</th><th>{t('remaining',lang)}</th><th>{t('assignPlanCol',lang)}</th></tr></thead>
               <tbody>
                 {visUsers.map(u=>{
                   const s=u.subscriptions?.[0];const p=s?.plans;
@@ -1489,7 +1800,7 @@ function SuperAdminPanel({ appData, auth }) {
                       </td>
                       <td style={{color:T.textMuted,fontSize:13}}>{u.companies?.name||'—'}</td>
                       <td><RoleBadge role={u.role}/></td>
-                      <td>{p?<span className="badge badge-blue">{p.name}</span>:<span className="badge badge-gray">No plan</span>}</td>
+                      <td>{p?<span className="badge badge-blue">{p.name}</span>:<span className="badge badge-gray">{t('noPlan',lang)}</span>}</td>
                       <td>
                         <span className="mono" style={{fontWeight:600}}>{used}</span>
                         {limit&&limit!==-1&&<span style={{color:T.textMuted}}> /{limit}</span>}
@@ -1500,7 +1811,7 @@ function SuperAdminPanel({ appData, auth }) {
                     </tr>
                   );
                 })}
-                {visUsers.length===0&&<tr><td colSpan={7} style={{textAlign:'center',color:T.textMuted,padding:32}}>No contractors yet</td></tr>}
+                {visUsers.length===0&&<tr><td colSpan={7} style={{textAlign:'center',color:T.textMuted,padding:32}}>{t('noContractorsYet',lang)}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -1510,10 +1821,10 @@ function SuperAdminPanel({ appData, auth }) {
       {/* QUOTES */}
       {tab==="quotes"&&(
         <div className="fade-up">
-          <h3 style={{fontWeight:700,fontSize:18,marginBottom:20}}>{selCompany?`${selCompany.name} — Quotes`:'All Quotes'}</h3>
+          <h3 style={{fontWeight:700,fontSize:18,marginBottom:20}}>{selCompany?`${selCompany.name} — ${t('quotes',lang)}`:t('allQuotesTitle',lang)}</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Customer</th><th>Contractor</th><th>Company</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
+              <thead><tr><th>{t('customer',lang)}</th><th>{t('contractor',lang)}</th><th>{t('company',lang)}</th><th>{t('date',lang)}</th><th>{t('total',lang)}</th><th>{t('status',lang)}</th></tr></thead>
               <tbody>
                 {visQuotes.map(q=>(
                   <tr key={q.id} className="clickable" onClick={()=>setSelQuote(q)}>
@@ -1530,11 +1841,11 @@ function SuperAdminPanel({ appData, auth }) {
                     <td><StatusBadge status={q.status}/></td>
                   </tr>
                 ))}
-                {visQuotes.length===0&&<tr><td colSpan={6} style={{textAlign:'center',color:T.textMuted,padding:32}}>No quotes yet</td></tr>}
+                {visQuotes.length===0&&<tr><td colSpan={6} style={{textAlign:'center',color:T.textMuted,padding:32}}>{t('noQuotesYet',lang)}</td></tr>}
               </tbody>
             </table>
           </div>
-          <div style={{marginTop:10,fontSize:12,color:T.accent}}>Click any row to see full details</div>
+          <div style={{marginTop:10,fontSize:12,color:T.accent}}>{t('clickRow',lang)}</div>
           {selQuote&&<QuoteDetailModal quote={selQuote} onClose={()=>setSelQuote(null)} onStatusChange={async(id,status)=>{await updateQuoteStatus(id,status);setSelQuote(q=>({...q,status}));}}/>}
         </div>
       )}
@@ -1552,7 +1863,7 @@ function SuperAdminPanel({ appData, auth }) {
       {modal?.type==='company'&&(
         <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setModal(null)}>
           <div className="modal">
-            <div style={{fontWeight:700,fontSize:17,marginBottom:20}}>{modal.data.id?'Edit':'Add'} Company</div>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:20}}>{modal.data.id?t('editCompany',lang):t('addCompany',lang)}</div>
             <CompanyForm data={modal.data} onSave={saveCompany} onClose={()=>setModal(null)} saving={saving}/>
           </div>
         </div>
@@ -1571,6 +1882,7 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
   const [processing, setProcessing] = useState(false);
   const [step, setStep] = useState('choose');       // 'choose' | 'confirm' | 'done'
 
+  const { lang } = useLang();
   const sub = contractor.subscriptions?.[0];
   const currentPlan = sub?.plans;
 
@@ -1680,15 +1992,15 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
             <div style={{ fontSize: 52, marginBottom: 16 }}>✅</div>
             <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 8 }}>
-              {mode === 'pack' ? `${selectedPack?.quotes} Quotes Added!` : `Plan Upgraded!`}
+              {mode === 'pack' ? `${selectedPack?.quotes} ${t('packAdded',lang)}` : t('planUpgraded',lang)}
             </div>
             <div style={{ fontSize: 14, color: T.textMuted, marginBottom: 8 }}>
-              {contractor.full_name} can now create more quotes.
+              {contractor.full_name} {t('canCreateMore',lang)}
             </div>
             <div style={{ background: T.warningLight, border: `1px solid #FDE68A`, borderRadius: 10, padding: '10px 14px', fontSize: 12, color: T.warning, marginBottom: 20 }}>
-              💳 <strong>Mock payment</strong> — ${mode === 'pack' ? selectedPack?.price : Math.max(0, (selectedPlan?.price_monthly||0)-(currentPlan?.price_monthly||0))} recorded. Connect Stripe to charge real cards.
+              {t('mockPayment',lang)} — ${mode === 'pack' ? selectedPack?.price : Math.max(0, (selectedPlan?.price_monthly||0)-(currentPlan?.price_monthly||0))} {t('recorded',lang)}
             </div>
-            <button className="btn btn-primary btn-full" onClick={() => { onSuccess(); onClose(); }}>Done</button>
+            <button className="btn btn-primary btn-full" onClick={() => { onSuccess(); onClose(); }}>{t('done',lang)}</button>
           </div>
         )}
 
@@ -1697,13 +2009,13 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 17 }}>Add Quotes for</div>
+                <div style={{ fontWeight: 800, fontSize: 17 }}>{t('addQuotesFor',lang)}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                   <div className="avatar" style={{ background: T.accent, width: 28, height: 28, fontSize: 11 }}>{(contractor.full_name||'U').charAt(0).toUpperCase()}</div>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{contractor.full_name}</div>
                     <div style={{ fontSize: 12, color: T.textMuted }}>
-                      {currentPlan?.name || 'No plan'} · {remaining} quotes left
+        {currentPlan?.name || t('noPlan',lang)} · {remaining} {t('quotesWord',lang)}
                     </div>
                   </div>
                 </div>
@@ -1713,7 +2025,7 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
 
             {/* Mode toggle */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 20, padding: 4, background: T.surfaceAlt, borderRadius: 10 }}>
-              {[{id:'pack',label:'🎁 Buy Quote Pack'},{id:'upgrade',label:'⬆️ Upgrade Plan'}].map(m => (
+              {[{id:'pack',label:t('buyPack',lang)},{id:'upgrade',label:t('upgradePlan',lang)}].map(m => (
                 <button key={m.id} onClick={() => setMode(m.id)}
                   style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
                     background: mode === m.id ? T.surface : 'transparent',
@@ -1727,13 +2039,13 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
             {/* PACK MODE */}
             {mode === 'pack' && (
               <>
-                <div style={{ fontWeight: 600, fontSize: 13, color: T.textMuted, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Choose a Pack</div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: T.textMuted, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('choosePack',lang)}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
                   {packs.map(pk => (
                     <div key={pk.id} onClick={() => setSelectedPack(pk)}
                       style={{ border: `2px solid ${selectedPack?.id === pk.id ? T.accent : T.border}`, borderRadius: 12, padding: '14px 12px', cursor: 'pointer', background: selectedPack?.id === pk.id ? T.accentLight : T.surface, transition: 'all 0.15s' }}>
                       <div style={{ fontWeight: 800, fontSize: 22, fontFamily: 'DM Mono', color: selectedPack?.id === pk.id ? T.accent : T.text }}>{pk.quotes}</div>
-                      <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8 }}>quotes</div>
+                      <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 8 }}>{t('quotesWord',lang)}</div>
                       <div style={{ fontWeight: 700, fontSize: 15 }}>{fmt(pk.price)}</div>
                       <div style={{ fontSize: 11, color: T.textMuted }}>{fmt(pk.price / pk.quotes)}/quote</div>
                       {selectedPack?.id === pk.id && <div style={{ fontSize: 10, color: T.accent, marginTop: 6, fontWeight: 700 }}>✓ SELECTED</div>}
@@ -1751,10 +2063,10 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
             {/* UPGRADE MODE */}
             {mode === 'upgrade' && (
               <>
-                <div style={{ fontWeight: 600, fontSize: 13, color: T.textMuted, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Upgrade To</div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: T.textMuted, marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('upgradeTo',lang)}</div>
                 {plans.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: 32, color: T.textMuted, fontSize: 13 }}>
-                    {currentPlan?.quote_limit === -1 ? '✓ Already on the highest plan (Enterprise)' : 'No higher plans available.'}
+                    {currentPlan?.quote_limit === -1 ? t('alreadyHighest',lang) : t('noHigherPlans',lang)}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
@@ -1765,7 +2077,7 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
                           style={{ border: `2px solid ${selectedPlan?.id === pl.id ? T.accent : T.border}`, borderRadius: 12, padding: '14px 16px', cursor: 'pointer', background: selectedPlan?.id === pl.id ? T.accentLight : T.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'all 0.15s' }}>
                           <div>
                             <div style={{ fontWeight: 700 }}>{pl.name}</div>
-                            <div style={{ fontSize: 12, color: T.textMuted }}>{pl.quote_limit === -1 ? 'Unlimited' : pl.quote_limit} quotes/month</div>
+                            <div style={{ fontSize: 12, color: T.textMuted }}>{pl.quote_limit === -1 ? t('unlimited',lang) : pl.quote_limit} {t('quotesWord',lang)}/mo</div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ fontWeight: 800, fontFamily: 'DM Mono' }}>{fmt(pl.price_monthly)}/mo</div>
@@ -1787,7 +2099,7 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
             <button className="btn btn-primary btn-full"
               disabled={processing || (mode === 'pack' && !selectedPack) || (mode === 'upgrade' && (!selectedPlan || plans.length === 0))}
               onClick={() => setStep('confirm')}>
-              Review & Confirm →
+              {t('reviewConfirm',lang)}
             </button>
           </>
         )}
@@ -1795,45 +2107,45 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
         {/* CONFIRM STATE */}
         {step === 'confirm' && (
           <>
-            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 20 }}>Confirm Purchase</div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 20 }}>{t('confirmPurchase',lang)}</div>
             <div style={{ background: T.surfaceAlt, borderRadius: 12, padding: 16, marginBottom: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                <span style={{ color: T.textMuted }}>Contractor</span>
+                <span style={{ color: T.textMuted }}>{t('contractor',lang)}</span>
                 <span style={{ fontWeight: 600 }}>{contractor.full_name}</span>
               </div>
               {mode === 'pack' ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <span style={{ color: T.textMuted }}>Pack</span>
+                    <span style={{ color: T.textMuted }}>{t('choosePack',lang)}</span>
                     <span style={{ fontWeight: 600 }}>{selectedPack?.name} ({selectedPack?.quotes} quotes)</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
-                    <span style={{ fontWeight: 700 }}>Total</span>
+                    <span style={{ fontWeight: 700 }}>{t('total',lang)}</span>
                     <span style={{ fontWeight: 800, fontFamily: 'DM Mono', fontSize: 18 }}>{fmt(selectedPack?.price)}</span>
                   </div>
                 </>
               ) : (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <span style={{ color: T.textMuted }}>From</span>
+                    <span style={{ color: T.textMuted }}>{t('from',lang)}</span>
                     <span style={{ fontWeight: 600 }}>{currentPlan?.name || 'No plan'}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                    <span style={{ color: T.textMuted }}>To</span>
+                    <span style={{ color: T.textMuted }}>{t('to',lang)}</span>
                     <span style={{ fontWeight: 600 }}>{selectedPlan?.name}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
-                    <span style={{ fontWeight: 700 }}>Total</span>
+                    <span style={{ fontWeight: 700 }}>{t('total',lang)}</span>
                     <span style={{ fontWeight: 800, fontFamily: 'DM Mono', fontSize: 18 }}>{fmt(selectedPlan?.price_monthly)}/mo</span>
                   </div>
                 </>
               )}
             </div>
             <div style={{ background: T.warningLight, border: `1px solid #FDE68A`, borderRadius: 10, padding: '10px 14px', fontSize: 12, color: T.warning, marginBottom: 16 }}>
-              💳 <strong>Mock mode</strong> — no real charge. This transaction will be recorded for when Stripe is connected.
+              {t('mockMode',lang)}
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setStep('choose')}>Back</button>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setStep('choose')}>{t('back',lang)}</button>
               <button className="btn btn-accent" style={{ flex: 2 }} disabled={processing} onClick={handleConfirm}>
                 {processing ? 'Processing...' : `Confirm ${mode === 'pack' ? fmt(selectedPack?.price) : fmt(selectedPlan?.price_monthly)+'/mo'}`}
               </button>
@@ -1847,6 +2159,7 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
 
 // ─── TEAM DASHBOARD ───────────────────────────────────────────────────────────
 function TeamDashboard({ quotes, contractors }) {
+  const { lang } = useLang();
   const [filterContractor, setFilterContractor] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterMonth, setFilterMonth] = useState("all");
@@ -1962,7 +2275,7 @@ function TeamDashboard({ quotes, contractors }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
         {/* ── Monthly trend chart ── */}
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px' }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: T.text }}>📅 Cotizaciones por mes (últimos 6 meses)</div>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: T.text }}>{t('monthlyTrend',lang)}</div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 100 }}>
             {monthlyData.map(m => (
               <div key={m.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
@@ -1990,20 +2303,20 @@ function TeamDashboard({ quotes, contractors }) {
           </div>
           <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: T.textMuted }}>
-              <div style={{ width: 10, height: 10, background: T.accent, borderRadius: 2 }} /> Cotizaciones
+              <div style={{ width: 10, height: 10, background: T.accent, borderRadius: 2 }} /> {t("quotes",lang)}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: T.textMuted }}>
-              <div style={{ width: 10, height: 10, background: T.success, borderRadius: 2 }} /> Pagadas
+              <div style={{ width: 10, height: 10, background: T.success, borderRadius: 2 }} /> {t("paid",lang)}
             </div>
           </div>
         </div>
 
         {/* ── Per-contractor cards ── */}
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px' }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: T.text }}>👷 Rendimiento por contractor</div>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: T.text }}>{t('contractorPerf',lang)}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 200, overflowY: 'auto' }}>
             {contractorStats.length === 0 && (
-              <div style={{ color: T.textMuted, fontSize: 13, textAlign: 'center', padding: 20 }}>No hay contractors aún</div>
+              <div style={{ color: T.textMuted, fontSize: 13, textAlign: 'center', padding: 20 }}>{t('noContractorsYet',lang)}</div>
             )}
             {contractorStats.map(c => (
               <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: T.surfaceAlt, borderRadius: 10 }}>
@@ -2012,14 +2325,14 @@ function TeamDashboard({ quotes, contractors }) {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {c.full_name || 'Sin nombre'}
+                    {c.full_name || t('noName',lang)}
                   </div>
-                  <div style={{ fontSize: 11, color: T.textMuted }}>{c.cq.length} cotizaciones · {c.closeRate}% cierre</div>
+                  <div style={{ fontSize: 11, color: T.textMuted }}>{c.cq.length} {t('quotesWord',lang)} · {c.closeRate}% {t('closeRate',lang)}</div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                   <div style={{ fontWeight: 700, fontFamily: 'DM Mono', fontSize: 13, color: T.success }}>{fmt(c.totalRev)}</div>
                   {c.avgDays !== null && (
-                    <div style={{ fontSize: 10, color: T.textMuted }}>~{c.avgDays}d to sign</div>
+                    <div style={{ fontSize: 10, color: T.textMuted }}>~{c.avgDays}{lang==='es'?' días para firmar':'d to sign'}</div>
                   )}
                 </div>
               </div>
@@ -2030,20 +2343,20 @@ function TeamDashboard({ quotes, contractors }) {
 
       {/* ── Contractor ranking table ── */}
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px', marginBottom: 28 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>🏆 Ranking de contractors</div>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>{t('ranking',lang)}</div>
         <div className="table-wrap" style={{ margin: 0 }}>
           <table>
             <thead>
               <tr>
                 <th>#</th>
-                <th>Contractor</th>
-                <th>Cotizaciones</th>
-                <th>Firmadas</th>
-                <th>Pagadas</th>
-                <th>Tasa cierre</th>
-                <th>Revenue total</th>
-                <th>Ticket prom.</th>
-                <th>Tiempo prom. firma</th>
+                <th>{t('contractor',lang)}</th>
+                <th>{t('quotes',lang)}</th>
+                <th>{t('signed',lang)}</th>
+                <th>{t('paid',lang)}</th>
+                <th>{t('closeRate',lang)}</th>
+                <th>{t('revenue',lang)}</th>
+                <th>{t('avgTicket',lang)}</th>
+                <th>{t('avgTimeSign',lang)}</th>
               </tr>
             </thead>
             <tbody>
@@ -2059,7 +2372,7 @@ function TeamDashboard({ quotes, contractors }) {
                       <div className="avatar" style={{ background: T.accent, width: 26, height: 26, fontSize: 11 }}>
                         {(c.full_name || 'U').charAt(0).toUpperCase()}
                       </div>
-                      <span style={{ fontWeight: 600 }}>{c.full_name || 'Sin nombre'}</span>
+                      <span style={{ fontWeight: 600 }}>{c.full_name || t('noName',lang)}</span>
                     </div>
                   </td>
                   <td><span className="mono" style={{ fontWeight: 700 }}>{c.cq.length}</span></td>
@@ -2075,11 +2388,11 @@ function TeamDashboard({ quotes, contractors }) {
                   </td>
                   <td><span className="mono" style={{ fontWeight: 700, color: T.success }}>{fmt(c.totalRev)}</span></td>
                   <td><span className="mono" style={{ fontSize: 13 }}>{c.paidCount > 0 ? fmt(c.totalRev / c.paidCount) : '—'}</span></td>
-                  <td style={{ color: T.textMuted, fontSize: 12 }}>{c.avgDays !== null ? `${c.avgDays} días` : '—'}</td>
+                  <td style={{ color: T.textMuted, fontSize: 12 }}>{c.avgDays !== null ? `${c.avgDays} ${t('days',lang)}` : '—'}</td>
                 </tr>
               ))}
               {contractorStats.length === 0 && (
-                <tr><td colSpan={9} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No hay datos aún</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>{t('noDataYet',lang)}</td></tr>
               )}
             </tbody>
           </table>
@@ -2089,29 +2402,29 @@ function TeamDashboard({ quotes, contractors }) {
       {/* ── Detailed quote list with filters ── */}
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>📋 Detalle de cotizaciones ({filtered.length})</div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{t('detailQuotes',lang)} ({filtered.length})</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <select value={filterContractor} onChange={e => setFilterContractor(e.target.value)}
               style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
-              <option value="all">👷 Todos los contractors</option>
-              {contractors.map(c => <option key={c.id} value={c.id}>{c.full_name || 'Sin nombre'}</option>)}
+              <option value="all">{t('allContractorsF',lang)}</option>
+              {contractors.map(c => <option key={c.id} value={c.id}>{c.full_name || t('noName',lang)}</option>)}
             </select>
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
               style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
-              <option value="all">🏷 Todos los estados</option>
+              <option value="all">{t('allStatuses',lang)}</option>
               {statuses.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
               style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
-              <option value="all">📅 Todos los meses</option>
+              <option value="all">{t('allMonths',lang)}</option>
               {availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <select value={sortBy} onChange={e => setSortBy(e.target.value)}
               style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
-              <option value="date_desc">↓ Más reciente</option>
-              <option value="date_asc">↑ Más antiguo</option>
-              <option value="total_desc">↓ Mayor valor</option>
-              <option value="total_asc">↑ Menor valor</option>
+              <option value="date_desc">{t('newestFirst',lang)}</option>
+              <option value="date_asc">{t('oldestFirst',lang)}</option>
+              <option value="total_desc">{t('highestValue',lang)}</option>
+              <option value="total_asc">{t('lowestValue',lang)}</option>
             </select>
           </div>
         </div>
@@ -2119,14 +2432,14 @@ function TeamDashboard({ quotes, contractors }) {
           <table>
             <thead>
               <tr>
-                <th>Cliente</th>
-                <th>Contractor</th>
-                <th>Fecha</th>
-                <th>Ventanas</th>
-                <th>Total</th>
-                <th>Depósito</th>
-                <th>Estado</th>
-                <th>Días desde cotiz.</th>
+                <th>{t('customer',lang)}</th>
+                <th>{t('contractor',lang)}</th>
+                <th>{t('date',lang)}</th>
+                <th>{t('windows',lang)}</th>
+                <th>{t('total',lang)}</th>
+                <th>{t('deposit',lang)}</th>
+                <th>{t('status',lang)}</th>
+                <th>{t('daysSinceCol',lang)}</th>
               </tr>
             </thead>
             <tbody>
@@ -2179,7 +2492,7 @@ function TeamDashboard({ quotes, contractors }) {
               })}
               {filtered.length === 0 && (
                 <tr><td colSpan={8} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>
-                  No hay cotizaciones con estos filtros
+                  {t('noQuotesFilter',lang)}
                 </td></tr>
               )}
             </tbody>
@@ -2187,8 +2500,8 @@ function TeamDashboard({ quotes, contractors }) {
         </div>
         {filtered.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: T.textMuted, padding: '0 4px' }}>
-            <span>{filtered.length} cotizaciones · Total: <strong style={{ color: T.text, fontFamily: 'DM Mono' }}>{fmt(filtered.reduce((s, q) => s + (q.total || 0), 0))}</strong></span>
-            <span>Pagadas: <strong style={{ color: T.success, fontFamily: 'DM Mono' }}>{fmt(filtered.filter(q => q.status === 'paid').reduce((s, q) => s + (q.total || 0), 0))}</strong></span>
+            <span>{filtered.length} {t('quotesCount',lang)} <strong style={{ color: T.text, fontFamily: 'DM Mono' }}>{fmt(filtered.reduce((s, q) => s + (q.total || 0), 0))}</strong></span>
+            <span>{t('paid',lang)}: <strong style={{ color: T.success, fontFamily: 'DM Mono' }}>{fmt(filtered.filter(q => q.status === 'paid').reduce((s, q) => s + (q.total || 0), 0))}</strong></span>
           </div>
         )}
       </div>
@@ -2198,6 +2511,7 @@ function TeamDashboard({ quotes, contractors }) {
 
 // ─── COMPANY ADMIN PANEL ──────────────────────────────────────────────────────
 function CompanyAdminPanel({ appData, auth }) {
+  const { lang } = useLang();
   const [tab, setTab] = useState("dashboard");
   const [contractors, setContractors] = useState([]);
   const [quotes, setQuotes] = useState([]);
@@ -2292,10 +2606,10 @@ function CompanyAdminPanel({ appData, auth }) {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {[
-            { label: "Contractors", value: contractors.length },
-            { label: "Quotes", value: quotes.length },
-            { label: "Revenue", value: fmt(rev) },
-            { label: "Billing", value: fmt(billingTotal), highlight: true },
+            { label: t("contractors",lang), value: contractors.length },
+            { label: t("quotes",lang), value: quotes.length },
+            { label: t("revenue",lang), value: fmt(rev) },
+            { label: t("billing",lang), value: fmt(billingTotal), highlight: true },
           ].map(s => (
             <div key={s.label} style={{ textAlign: 'center', padding: '8px 12px', background: s.highlight ? T.accentLight : T.surfaceAlt, borderRadius: 10, border: `1px solid ${s.highlight ? '#BFDBFE' : T.border}` }}>
               <div style={{ fontWeight: 800, fontSize: 16, fontFamily: 'DM Mono', color: s.highlight ? T.accent : T.text }}>{s.value}</div>
@@ -2307,8 +2621,8 @@ function CompanyAdminPanel({ appData, auth }) {
       </div>
 
       <div className="admin-nav">
-        {[{ id: "dashboard", label: "📊 Dashboard" }, { id: "team", label: "👥 My Team" }, { id: "quotes", label: "📋 Quotes" }, { id: "billing", label: "💳 Billing" }, { id: "catalog", label: "🪟 My Catalog" }].map(t => (
-          <button key={t.id} className={`admin-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+        {[{ id: "dashboard", label: t('dashboardTab',lang) }, { id: "team", label: t('myTeam',lang) }, { id: "quotes", label: t('allQuotesTab',lang) }, { id: "billing", label: t('billingTab',lang) }, { id: "catalog", label: t('catalogTab',lang) }].map(tb => (
+          <button key={tb.id} className={`admin-nav-item ${tab === tb.id ? 'active' : ''}`} onClick={() => setTab(tb.id)}>{tb.label}</button>
         ))}
       </div>
 
@@ -2320,10 +2634,10 @@ function CompanyAdminPanel({ appData, auth }) {
       {/* TEAM TAB */}
       {tab === "team" && (
         <div className="fade-up">
-          <h3 style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>My Team</h3>
+          <h3 style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>{t('myTeam',lang)}</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Contractor</th><th>Plan</th><th>Quotes Used</th><th>Remaining</th><th>Last Activity</th><th>Actions</th></tr></thead>
+              <thead><tr><th>{t('contractor',lang)}</th><th>{t('plan',lang)}</th><th>{t('used',lang)}</th><th>{t('remaining',lang)}</th><th>{t('lastActivity',lang)}</th><th>{t('actions',lang)}</th></tr></thead>
               <tbody>
                 {contractors.map(u => {
                   const s = u.subscriptions?.[0]; const p = s?.plans;
@@ -2350,15 +2664,15 @@ function CompanyAdminPanel({ appData, auth }) {
                               ✏️
                             </button>
                           </div>
-                            {!hasPlan && <div style={{ fontSize: 11, color: T.danger }}>⚠ No plan — can't create quotes</div>}
-                            {isLow && <div style={{ fontSize: 11, color: T.warning }}>⚠ Low on quotes</div>}
+                            {!hasPlan && <div style={{ fontSize: 11, color: T.danger }}>{t('noPlanWarn',lang)}</div>}
+                            {isLow && <div style={{ fontSize: 11, color: T.warning }}>{t('lowQuotes',lang)}</div>}
                           </div>
                         </div>
                       </td>
                       <td>
                         {hasPlan
                           ? <span className="badge badge-blue">{p.name}</span>
-                          : <span className="badge badge-red">No Plan</span>
+                          : <span className="badge badge-red">{t('noPlan',lang)}</span>
                         }
                       </td>
                       <td>
@@ -2377,24 +2691,24 @@ function CompanyAdminPanel({ appData, auth }) {
                         }
                       </td>
                       <td style={{ color: T.textMuted, fontSize: 12 }}>
-                        {last ? new Date(last.created_at).toLocaleDateString() : 'No activity'}
+                        {last ? new Date(last.created_at).toLocaleDateString() : t('noActivity',lang)}
                       </td>
                       <td>
                         <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                           {!hasPlan ? (
                             <button className="btn btn-primary btn-sm" onClick={() => setAddQuotesFor({ ...u, _forceMode: 'upgrade' })}
                               style={{ fontSize: 12 }}>
-                              🚀 Assign Plan
+                              {t('assignPlan',lang)}
                             </button>
                           ) : (
                             <button className="btn btn-accent btn-sm" onClick={() => setAddQuotesFor(u)}
                               style={{ fontSize: 12 }}>
-                              + Add Quotes
+                              {t('addQuotes',lang)}
                             </button>
                           )}
                           <button className="btn btn-secondary btn-sm" onClick={() => setResetPwFor(u)}
                             style={{ fontSize: 12 }} title="Send password reset email">
-                            🔑 Reset PW
+                            {t('resetPW',lang)}
                           </button>
                         </div>
                       </td>
@@ -2403,7 +2717,7 @@ function CompanyAdminPanel({ appData, auth }) {
                 })}
                 {contractors.length === 0 && (
                   <tr><td colSpan={6} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>
-                    No contractors yet. Ask your admin to add team members.
+  {t('noContractors',lang)}
                   </td></tr>
                 )}
               </tbody>
@@ -2415,10 +2729,10 @@ function CompanyAdminPanel({ appData, auth }) {
       {/* QUOTES TAB */}
       {tab === "quotes" && (
         <div className="fade-up">
-          <h3 style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>All Quotes</h3>
+          <h3 style={{ fontWeight: 700, fontSize: 18, marginBottom: 20 }}>{t('allQuotesTitle',lang)}</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Customer</th><th>Contractor</th><th>Date</th><th>Total</th><th>Status</th></tr></thead>
+              <thead><tr><th>{t('customer',lang)}</th><th>{t('contractor',lang)}</th><th>{t('date',lang)}</th><th>{t('total',lang)}</th><th>{t('status',lang)}</th></tr></thead>
               <tbody>
                 {quotes.map(q => (
                   <tr key={q.id} className="clickable" onClick={() => setSelQuote(q)}>
@@ -2434,11 +2748,11 @@ function CompanyAdminPanel({ appData, auth }) {
                     <td><StatusBadge status={q.status} /></td>
                   </tr>
                 ))}
-                {quotes.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No quotes yet</td></tr>}
+                {quotes.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>{t('noQuotesYet',lang)}</td></tr>}
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: 10, fontSize: 12, color: T.accent }}>Click any row to see full details</div>
+          <div style={{ marginTop: 10, fontSize: 12, color: T.accent }}>{t('clickRow',lang)}</div>
           {selQuote && <QuoteDetailModal quote={selQuote} onClose={() => setSelQuote(null)} onStatusChange={async (id, status) => { await updateStatus(id, status); setSelQuote(q => ({ ...q, status })); }} />}
         </div>
       )}
@@ -2447,17 +2761,17 @@ function CompanyAdminPanel({ appData, auth }) {
       {tab === "billing" && (
         <div className="fade-up">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontWeight: 700, fontSize: 18 }}>Billing History</h3>
+            <h3 style={{ fontWeight: 700, fontSize: 18 }}>{t('billingHistory',lang)}</h3>
             <div style={{ background: T.accentLight, border: `1px solid #BFDBFE`, borderRadius: 10, padding: '8px 14px' }}>
-              <span style={{ fontSize: 12, color: T.textMuted }}>Total spent: </span>
+              <span style={{ fontSize: 12, color: T.textMuted }}>{t('totalSpent',lang)} </span>
               <span style={{ fontWeight: 800, fontFamily: 'DM Mono', color: T.accent }}>{fmt(billingTotal)}</span>
             </div>
           </div>
           {transactions.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 60, color: T.textMuted }}>
               <div style={{ fontSize: 36, marginBottom: 12 }}>💳</div>
-              <div style={{ fontWeight: 600 }}>No transactions yet</div>
-              <div style={{ fontSize: 13, marginTop: 4 }}>Purchases will appear here</div>
+              <div style={{ fontWeight: 600 }}>{t('noTransactions',lang)}</div>
+              <div style={{ fontSize: 13, marginTop: 4 }}>{t('purchasesHere',lang)}</div>
             </div>
           ) : (
             <div className="table-wrap">
@@ -2489,7 +2803,7 @@ function CompanyAdminPanel({ appData, auth }) {
           )}
           <div className="info-box" style={{ marginTop: 16 }}>
             <Icon name="info" size={14} />
-            <span>Transactions marked <strong>🔸 Mock</strong> will be real Stripe charges once payments are connected.</span>
+            <span>{t('mockWarning2',lang)}</span>
           </div>
         </div>
       )}
@@ -2499,7 +2813,7 @@ function CompanyAdminPanel({ appData, auth }) {
         <div className="fade-up">
           <div className="info-box" style={{ marginBottom: 20 }}>
             <Icon name="info" size={14} />
-            <div><strong>Your custom catalog</strong> — products you add here override global products of the same name for your contractors only.</div>
+            <div><strong>{t('customCatalog',lang)}</strong> {t('customCatalogDesc',lang)}</div>
           </div>
           <ProductsAdmin appData={appData} showToast={t => setToast({ message: t, type: "success" })} companyId={auth.companyId} companies={[]} />
         </div>
@@ -2510,6 +2824,7 @@ function CompanyAdminPanel({ appData, auth }) {
 
 // ─── SUPER BILLING PANEL ──────────────────────────────────────────────────────
 function SuperBillingPanel({ companyFilter }) {
+  const { lang } = useLang();
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -2551,10 +2866,10 @@ function SuperBillingPanel({ companyFilter }) {
       {/* Summary cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
         {[
-          { label: 'Total Revenue', value: fmt(totalRevenue), color: T.accent, bg: T.accentLight },
-          { label: 'Transactions', value: transactions.length, color: T.text, bg: T.surfaceAlt },
-          { label: 'Mock (pending Stripe)', value: mockCount, color: T.warning, bg: T.warningLight },
-          { label: 'Real Payments', value: realCount, color: T.success, bg: T.successLight },
+          { label: t('totalRevenue',lang), value: fmt(totalRevenue), color: T.accent, bg: T.accentLight },
+          { label: t('transactions',lang), value: transactions.length, color: T.text, bg: T.surfaceAlt },
+          { label: t('mockPending',lang), value: mockCount, color: T.warning, bg: T.warningLight },
+          { label: t('realPayments',lang), value: realCount, color: T.success, bg: T.successLight },
         ].map(s => (
           <div key={s.label} style={{ background: s.bg, borderRadius: 12, padding: '16px', border: `1px solid ${T.border}` }}>
             <div style={{ fontWeight: 800, fontSize: 24, fontFamily: 'DM Mono', color: s.color }}>{s.value}</div>
@@ -2566,7 +2881,7 @@ function SuperBillingPanel({ companyFilter }) {
       {/* Company breakdown (only when not filtered) */}
       {!companyFilter && Object.keys(byCompany).length > 1 && (
         <div style={{ marginBottom: 24 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: T.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>By Company</div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: T.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10 }}>{t('byCompany',lang)}</div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {Object.values(byCompany).sort((a, b) => b.total - a.total).map(c => (
               <div key={c.name} style={{ background: T.surface, border: `1.5px solid ${T.border}`, borderRadius: 10, padding: '10px 14px', minWidth: 140 }}>
@@ -2582,8 +2897,8 @@ function SuperBillingPanel({ companyFilter }) {
       {transactions.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, color: T.textMuted }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>💰</div>
-          <div style={{ fontWeight: 600 }}>No transactions yet</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>They'll appear here as companies purchase quotes</div>
+          <div style={{ fontWeight: 600 }}>{t('noTransactions',lang)}</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>{t('theyAppear',lang)}</div>
         </div>
       ) : (
         <div className="table-wrap">
@@ -2616,7 +2931,7 @@ function SuperBillingPanel({ companyFilter }) {
       {mockCount > 0 && (
         <div className="info-box" style={{ marginTop: 16 }}>
           <Icon name="info" size={14} />
-          <span><strong>{mockCount} mock transaction{mockCount > 1 ? 's' : ''}</strong> recorded. Once Stripe is connected, these will become real charges automatically.</span>
+          <span><strong>{mockCount} {mockCount > 1 ? t('mockCountP',lang) : t('mockCount',lang)}</strong> {t('mockOnce',lang)}</span>
         </div>
       )}
     </div>
@@ -2627,6 +2942,7 @@ function SuperBillingPanel({ companyFilter }) {
 // companyId: if set, this admin can only manage their company's products
 // companies: list of all companies (superadmin only, for the scope dropdown)
 function ProductsAdmin({ appData, showToast, companyId = null, companies = [] }) {
+  const { lang } = useLang();
   const { products, reload } = appData;
   const [modal, setModal] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -2647,7 +2963,7 @@ function ProductsAdmin({ appData, showToast, companyId = null, companies = [] })
   };
 
   const deactivate = async (id) => {
-    if (!confirm("Deactivate this product?")) return;
+    if (!confirm(t('deactivateConfirm',lang))) return;
     await supabase.from('products').update({ active: false }).eq('id', id);
     showToast("Product deactivated");
     if (reload) reload();
@@ -2669,9 +2985,9 @@ function ProductsAdmin({ appData, showToast, companyId = null, companies = [] })
   return (
     <div className="fade-up">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h3 style={{ fontWeight: 700, fontSize: 18 }}>Products</h3>
+        <h3 style={{ fontWeight: 700, fontSize: 18 }}>{t('products',lang)}</h3>
         <button className="btn btn-primary btn-sm" onClick={() => setModal({ name: '', base_price: '', scope: companyId || 'global' })}>
-          <Icon name="plus" /> Add Product
+          <Icon name="plus" /> {t('addProduct',lang)}
         </button>
       </div>
 
@@ -2690,8 +3006,8 @@ function ProductsAdmin({ appData, showToast, companyId = null, companies = [] })
         <table>
           <thead>
             <tr>
-              <th>Product Name</th>
-              <th>Base Price</th>
+              <th>{t('productName',lang)}</th>
+              <th>{t('basePrice',lang)}</th>
               {companies.length > 0 && <th>Scope</th>}
               <th>Actions</th>
             </tr>
@@ -2725,7 +3041,7 @@ function ProductsAdmin({ appData, showToast, companyId = null, companies = [] })
       {companies.length > 0 && (
         <div className="info-box" style={{ marginTop: 16 }}>
           <Icon name="info" size={14} />
-          <span><strong>Global</strong> products appear in every company's Wizard. <strong>Company</strong> products override globals of the same name for that company only.</span>
+          <span>{t('globalDesc',lang)}</span>
         </div>
       )}
 
@@ -2733,34 +3049,34 @@ function ProductsAdmin({ appData, showToast, companyId = null, companies = [] })
       {modal && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
           <div className="modal">
-            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>{modal.id ? 'Edit' : 'Add'} Product</div>
+            <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 20 }}>{modal.id ? t('editProduct',lang) : t('addProduct',lang)}</div>
 
             <div className="field">
-              <label className="label">Product Name</label>
+              <label className="label">{t('productName',lang)}</label>
               <input className="input" placeholder="e.g. Triple Pane Premium" value={modal.name} onChange={e => setModal({ ...modal, name: e.target.value })} />
             </div>
 
             <div className="field">
-              <label className="label">Base Price ($)</label>
+              <label className="label">{t('basePrice',lang)}</label>
               <input className="input" type="number" placeholder="350" value={modal.base_price} onChange={e => setModal({ ...modal, base_price: e.target.value })} />
             </div>
 
             {/* Scope selector — only for superadmin */}
             {companies.length > 0 && (
               <div className="field">
-                <label className="label">Assign To</label>
+                <label className="label">{t('scopeLabel',lang)}</label>
                 <select className="select" value={modal.scope || 'global'} onChange={e => setModal({ ...modal, scope: e.target.value })}>
-                  <option value="global">🌐 Global (all companies)</option>
+                  <option value="global">{t('globalScope',lang)}</option>
                   {companies.map(c => <option key={c.id} value={c.id}>🏢 {c.name}</option>)}
                 </select>
-                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Global products appear for everyone. Company products only appear for that company's contractors.</div>
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{t('scopeHint',lang)}</div>
               </div>
             )}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModal(null)}>Cancel</button>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModal(null)}>{t('cancel',lang)}</button>
               <button className="btn btn-primary" style={{ flex: 2 }} disabled={saving || !modal.name || !modal.base_price} onClick={() => save(modal)}>
-                {saving ? "Saving..." : <><Icon name="save" /> Save Product</>}
+                {saving ? t('saving',lang) : <><Icon name="save" /> {t('save',lang)}</>}
               </button>
             </div>
           </div>
@@ -2772,6 +3088,7 @@ function ProductsAdmin({ appData, showToast, companyId = null, companies = [] })
 
 // ─── CITIES ADMIN ─────────────────────────────────────────────────────────────
 function CitiesAdmin({ appData, showToast }) {
+  const { lang } = useLang();
   const {cityRules}=appData;
   const [modal,setModal]=useState(null);const [saving,setSaving]=useState(false);
   const save=async(form)=>{
@@ -2784,12 +3101,12 @@ function CitiesAdmin({ appData, showToast }) {
   return(
     <div className="fade-up">
       <div style={{display:'flex',justifyContent:'space-between',marginBottom:20}}>
-        <h3 style={{fontWeight:700,fontSize:18}}>City Rules</h3>
-        <button className="btn btn-primary btn-sm" onClick={()=>setModal({zip:'',city:'',county:'',permit_required:false,hurricane_zone:false,inspection_required:false,permit_cost:0})}><Icon name="plus"/> Add ZIP</button>
+        <h3 style={{fontWeight:700,fontSize:18}}>{t('cityRules',lang)}</h3>
+        <button className="btn btn-primary btn-sm" onClick={()=>setModal({zip:'',city:'',county:'',permit_required:false,hurricane_zone:false,inspection_required:false,permit_cost:0})}><Icon name="plus"/> {t('addZip',lang)}</button>
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>ZIP</th><th>City</th><th>Permit</th><th>Hurricane</th><th>Permit $</th><th>Actions</th></tr></thead>
+          <thead><tr><th>{t('zip',lang)}</th><th>{t('city',lang)}</th><th>{t('permit',lang)}</th><th>{t('hurricane',lang)}</th><th>{t('permitCost',lang)}</th><th>{t('actions',lang)}</th></tr></thead>
           <tbody>{cityRules.map(r=>(
             <tr key={r.id}>
               <td className="mono" style={{fontWeight:600}}>{r.zip}</td><td style={{fontWeight:500}}>{r.city}</td>
@@ -2804,22 +3121,22 @@ function CitiesAdmin({ appData, showToast }) {
       {modal&&(
         <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setModal(null)}>
           <div className="modal">
-            <div style={{fontWeight:700,fontSize:17,marginBottom:16}}>{modal.id?'Edit':'Add'} City Rule</div>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:16}}>{modal.id?t('editCityRule',lang):t('addCityRule',lang)}</div>
             <div className="row">
-              <div className="col field"><label className="label">ZIP</label><input className="input" value={modal.zip} onChange={e=>setModal({...modal,zip:e.target.value})}/></div>
-              <div className="col field"><label className="label">City</label><input className="input" value={modal.city} onChange={e=>setModal({...modal,city:e.target.value})}/></div>
+              <div className="col field"><label className="label">{t('zip',lang)}</label><input className="input" value={modal.zip} onChange={e=>setModal({...modal,zip:e.target.value})}/></div>
+              <div className="col field"><label className="label">{t('city',lang)}</label><input className="input" value={modal.city} onChange={e=>setModal({...modal,city:e.target.value})}/></div>
             </div>
-            <div className="field"><label className="label">County</label><input className="input" value={modal.county||''} onChange={e=>setModal({...modal,county:e.target.value})}/></div>
-            <div className="field"><label className="label">Permit Cost ($)</label><input className="input" type="number" value={modal.permit_cost} onChange={e=>setModal({...modal,permit_cost:e.target.value})}/></div>
-            {[['permit_required','Permit Required'],['hurricane_zone','Hurricane Zone'],['inspection_required','Inspection Required']].map(([key,label])=>(
+            <div className="field"><label className="label">{t('county',lang)}</label><input className="input" value={modal.county||''} onChange={e=>setModal({...modal,county:e.target.value})}/></div>
+            <div className="field"><label className="label">{t('permitCost',lang)}</label><input className="input" type="number" value={modal.permit_cost} onChange={e=>setModal({...modal,permit_cost:e.target.value})}/></div>
+            {[[`permit_required`,t('permitRequired',lang)],[`hurricane_zone`,t('hurricaneZoneChk',lang)],[`inspection_required`,t('inspectionReq',lang)]].map(([key,label])=>(
               <div key={key} className={`checkbox-row ${modal[key]?'checked':''}`} onClick={()=>setModal({...modal,[key]:!modal[key]})} style={{marginBottom:8}}>
                 <div className={`checkbox-box ${modal[key]?'checked':''}`}>{modal[key]&&<Icon name="check" size={12}/>}</div>
                 <div className="checkbox-label">{label}</div>
               </div>
             ))}
             <div style={{display:'flex',gap:10,marginTop:8}}>
-              <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setModal(null)}>Cancel</button>
-              <button className="btn btn-primary" style={{flex:2}} disabled={saving} onClick={()=>save(modal)}>{saving?"...":<><Icon name="save"/> Save</>}</button>
+              <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setModal(null)}>{t('cancel',lang)}</button>
+              <button className="btn btn-primary" style={{flex:2}} disabled={saving} onClick={()=>save(modal)}>{saving?'...':<><Icon name="save"/> {t('save',lang)}</>}</button>
             </div>
           </div>
         </div>
@@ -2830,15 +3147,16 @@ function CitiesAdmin({ appData, showToast }) {
 
 // ─── COMPANY FORM ─────────────────────────────────────────────────────────────
 function CompanyForm({ data, onSave, onClose, saving }) {
+  const { lang } = useLang();
   const [form,setForm]=useState(data);
   return(
     <>
-      <div className="field"><label className="label">Company Name</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ABC Windows Inc."/></div>
-      <div className="field"><label className="label">Phone</label><input className="input" value={form.phone||''} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="(305) 555-0100"/></div>
-      <div className="field"><label className="label">Address</label><input className="input" value={form.address||''} onChange={e=>setForm({...form,address:e.target.value})} placeholder="123 Main St, Miami FL"/></div>
+      <div className="field"><label className="label">{t('companyName',lang)}</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ABC Windows Inc."/></div>
+      <div className="field"><label className="label">{t('phone',lang)}</label><input className="input" value={form.phone||''} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="(305) 555-0100"/></div>
+      <div className="field"><label className="label">{t('address',lang)}</label><input className="input" value={form.address||''} onChange={e=>setForm({...form,address:e.target.value})} placeholder="123 Main St, Miami FL"/></div>
       <div style={{display:'flex',gap:10,marginTop:8}}>
-        <button className="btn btn-secondary" style={{flex:1}} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{flex:2}} disabled={saving} onClick={()=>onSave(form)}>{saving?"...":<><Icon name="save"/> Save</>}</button>
+        <button className="btn btn-secondary" style={{flex:1}} onClick={onClose}>{t('cancel',lang)}</button>
+        <button className="btn btn-primary" style={{flex:2}} disabled={saving} onClick={()=>onSave(form)}>{saving?'...':<><Icon name="save"/> {t('save',lang)}</>}</button>
       </div>
     </>
   );
@@ -2847,15 +3165,20 @@ function CompanyForm({ data, onSave, onClose, saving }) {
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App() {
   const auth = useAuth();
-  // Contractors & company admins get filtered data; superadmin gets all
+  const [lang, setLang] = useState(() => localStorage.getItem('wq_lang') || 'en');
+  const changeLang = (l) => { setLang(l); localStorage.setItem('wq_lang', l); };
   const appData = useAppData(auth.isSuperAdmin ? null : auth.companyId);
 
-  if (auth.loading) return <><style>{css}</style><LoadingScreen/></>;
-  if (!auth.user) return <><style>{css}</style><LoginScreen onLogin={auth.signIn}/></>;
+  if (auth.loading) return <LangContext.Provider value={{ lang, setLang: changeLang }}><style>{css}</style><LoadingScreen/></LangContext.Provider>;
+  if (!auth.user) return <LangContext.Provider value={{ lang, setLang: changeLang }}><style>{css}</style><LoginScreen onLogin={auth.signIn}/></LangContext.Provider>;
 
-  if (auth.isContractor) return <><style>{css}</style><Wizard appData={appData} auth={auth}/></>;
-  if (auth.isCompanyAdmin) return <><style>{css}</style><CompanyAdminPanel appData={appData} auth={auth}/></>;
-  if (auth.isSuperAdmin) return <><style>{css}</style><SuperAdminPanel appData={appData} auth={auth}/></>;
-
-  return <><style>{css}</style><Wizard appData={appData} auth={auth}/></>;
+  return (
+    <LangContext.Provider value={{ lang, setLang: changeLang }}>
+      <style>{css}</style>
+      {auth.isContractor && <Wizard appData={appData} auth={auth}/>}
+      {auth.isCompanyAdmin && <CompanyAdminPanel appData={appData} auth={auth}/>}
+      {auth.isSuperAdmin && <SuperAdminPanel appData={appData} auth={auth}/>}
+      {!auth.isContractor && !auth.isCompanyAdmin && !auth.isSuperAdmin && <Wizard appData={appData} auth={auth}/>}
+    </LangContext.Provider>
+  );
 }
