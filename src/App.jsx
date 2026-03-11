@@ -302,7 +302,7 @@ function useSubscription(userId) {
   const load = async () => {
     if (!userId) { setLoading(false); return; }
     const [sr, pr] = await Promise.all([
-      supabase.from('subscriptions').select('*,plans(*)').eq('user_id',userId).eq('status','active').limit(1).single(),
+      supabase.from('subscriptions').select('*,plans(*)').eq('user_id',userId).eq('status','active').limit(1).maybeSingle(),
       supabase.from('plans').select('*').eq('active',true).order('price_monthly'),
     ]);
     if (sr.data) { setSub(sr.data); setPlan(sr.data.plans); }
