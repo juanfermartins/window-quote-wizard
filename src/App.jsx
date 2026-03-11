@@ -757,16 +757,31 @@ function QuoteDetailModal({ quote, onClose, onStatusChange }) {
           <div className="card-sm" style={{marginBottom:10,background:'#EFF6FF',border:'1px solid #BFDBFE'}}>
             <div style={{fontWeight:700,fontSize:11,textTransform:'uppercase',letterSpacing:'0.5px',color:'#1D4ED8',marginBottom:8}}>🤖 AI Scan Details</div>
             {quote.ai_notes.map((a,i)=>(
-              <div key={i} style={{fontSize:12,padding:'6px 0',borderBottom:i<quote.ai_notes.length-1?`1px solid #BFDBFE`:'none'}}>
-                <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                  <span style={{fontWeight:600}}>Window {i+1}:</span>
-                  <span style={{color:'#1D4ED8'}}>AI detected: <strong>"{a.ai_detected}"</strong></span>
-                  {a.confidence && <span className="badge badge-blue" style={{fontSize:10}}>confidence: {a.confidence}</span>}
-                  {a.no_match && <span className="badge badge-red" style={{fontSize:10}}>⚠ No match</span>}
-                  {a.custom_price && <span className="badge badge-orange" style={{fontSize:10}}>✏ Manual: ${a.custom_price}</span>}
-                  {!a.no_match && <span className="badge badge-green" style={{fontSize:10}}>✓ Matched → {a.window_type_selected}</span>}
+              <div key={i} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0',borderBottom:i<quote.ai_notes.length-1?`1px solid #BFDBFE`:'none'}}>
+                {a.photo_url ? (
+                  <a href={a.photo_url} target="_blank" rel="noopener noreferrer" title="View full photo">
+                    <img
+                      src={a.photo_url}
+                      alt={`Window ${i+1} scan`}
+                      style={{width:64,height:64,objectFit:'cover',borderRadius:8,flexShrink:0,border:'2px solid #BFDBFE',cursor:'pointer',transition:'opacity 0.15s'}}
+                      onMouseOver={e=>e.target.style.opacity='0.8'}
+                      onMouseOut={e=>e.target.style.opacity='1'}
+                    />
+                  </a>
+                ) : (
+                  <div style={{width:64,height:64,borderRadius:8,background:'#DBEAFE',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}}>📷</div>
+                )}
+                <div style={{flex:1,fontSize:12}}>
+                  <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',marginBottom:4}}>
+                    <span style={{fontWeight:700,color:'#1D4ED8'}}>Window {i+1}</span>
+                    {a.confidence && <span className="badge badge-blue" style={{fontSize:10}}>confidence: {a.confidence}</span>}
+                    {a.no_match && <span className="badge badge-red" style={{fontSize:10}}>⚠ No match</span>}
+                    {a.custom_price && <span className="badge badge-orange" style={{fontSize:10}}>✏ Manual: ${a.custom_price}</span>}
+                    {!a.no_match && <span className="badge badge-green" style={{fontSize:10}}>✓ Matched → {a.window_type_selected}</span>}
+                  </div>
+                  <div style={{color:'#1D4ED8',marginBottom:2}}>AI detected: <strong>"{a.ai_detected}"</strong></div>
+                  {a.notes && <div style={{color:'#6B7280',fontStyle:'italic'}}>"{a.notes}"</div>}
                 </div>
-                {a.notes && <div style={{color:'#6B7280',fontStyle:'italic',marginTop:3}}>"{a.notes}"</div>}
               </div>
             ))}
           </div>
@@ -848,6 +863,43 @@ function fuzzyMatch(aiType, products) {
   }
   // Threshold: >=0.5 is a usable suggestion, <0.5 = no confident match
   return { exact: bestScore === 1 ? best : null, best, score: bestScore };
+}
+
+
+// ─── PHOTO COMPRESSION + UPLOAD ──────────────────────────────────────────────
+// Compress image to max 800px wide, JPEG 72% quality → ~150-250KB
+async function compressPhoto(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX = 800;
+      let w = img.width, h = img.height;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.72);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+// Upload compressed photo to Supabase Storage, return public URL
+async function uploadScanPhoto(file, quoteRef) {
+  try {
+    const compressed = await compressPhoto(file);
+    if (!compressed) return null;
+    const path = `scans/${quoteRef}_${Date.now()}.jpg`;
+    const { error } = await supabase.storage
+      .from('quote-photos')
+      .upload(path, compressed, { contentType: 'image/jpeg', upsert: false });
+    if (error) { console.error('Upload error:', error); return null; }
+    const { data } = supabase.storage.from('quote-photos').getPublicUrl(path);
+    return data.publicUrl;
+  } catch(e) { console.error('Photo upload failed:', e); return null; }
 }
 
 // ─── PDF GENERATOR ────────────────────────────────────────────────────────────
@@ -1068,6 +1120,8 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
   const [scanning,setScanning] = useState(false);
   const [scanResult,setScanResult] = useState(null);
   const [scanNoMatch,setScanNoMatch] = useState(false);
+  const [scanPhotoUrl,setScanPhotoUrl] = useState(null);   // uploaded compressed photo URL
+  const [uploading,setUploading] = useState(false);
   const fileRef = useRef(null);
 
   const add = () => {
@@ -1079,6 +1133,7 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
       ai_notes: scanResult?.notes || null,
       ai_no_match: !!form._aiNoMatch,
       ai_custom_price: form._customPrice ? Number(form._customPrice) : null,
+      ai_photo_url: form._photoUrl || scanPhotoUrl || null,
     } : {};
     const windowData = {...form, ...aiMeta, id: form.id || Date.now()};
     if(editIdx!==null){const u=[...windows];u[editIdx]=windowData;setWindows(u);setEditIdx(null);}
@@ -1089,29 +1144,38 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
   const handleScan = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setScanning(true); setScanResult(null);
+    setScanning(true); setScanResult(null); setScanPhotoUrl(null);
     try {
-      const base64 = await new Promise((res,rej) => {
+      // Run AI analysis + photo compression+upload in parallel
+      const base64Promise = new Promise((res,rej) => {
         const reader = new FileReader();
         reader.onload = () => res(reader.result.split(',')[1]);
         reader.onerror = rej;
         reader.readAsDataURL(file);
       });
+
+      // Generate a temp ref for the file path (will be replaced by quote id later)
+      const tempRef = `tmp_${Date.now()}`;
+
+      const [base64, photoUrl] = await Promise.all([
+        base64Promise,
+        uploadScanPhoto(file, tempRef).catch(() => null),
+      ]);
+
+      if (photoUrl) setScanPhotoUrl(photoUrl);
+
       const result = await analyzeWindowPhoto(base64, products);
       if (result) {
         setScanResult(result);
         const { exact, best, score } = fuzzyMatch(result.type, products);
         if (exact) {
-          // Perfect match — auto-fill silently
-          setForm(f => ({ ...f, type: exact.name, width: result.width||36, height: result.height||48, _aiNoMatch: false, _aiRawType: result.type }));
+          setForm(f => ({ ...f, type: exact.name, width: result.width||36, height: result.height||48, _aiNoMatch: false, _aiRawType: result.type, _photoUrl: photoUrl }));
           setScanNoMatch(false);
         } else if (best && score >= 0.5) {
-          // Close match — pre-fill with suggestion, flag for contractor review
-          setForm(f => ({ ...f, type: best.name, width: result.width||36, height: result.height||48, _aiNoMatch: true, _aiRawType: result.type, _aiScore: score, _customPrice: '' }));
+          setForm(f => ({ ...f, type: best.name, width: result.width||36, height: result.height||48, _aiNoMatch: true, _aiRawType: result.type, _aiScore: score, _customPrice: '', _photoUrl: photoUrl }));
           setScanNoMatch(true);
         } else {
-          // No good match — show all products, offer manual price
-          setForm(f => ({ ...f, type: products[0]?.name||'', width: result.width||36, height: result.height||48, _aiNoMatch: true, _aiRawType: result.type, _aiScore: score, _customPrice: '' }));
+          setForm(f => ({ ...f, type: products[0]?.name||'', width: result.width||36, height: result.height||48, _aiNoMatch: true, _aiRawType: result.type, _aiScore: score, _customPrice: '', _photoUrl: photoUrl }));
           setScanNoMatch(true);
         }
         setShow(true);
@@ -1128,16 +1192,26 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
 
       {/* AI Scan Result Banner */}
       {scanResult && !scanNoMatch && (
-        <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13}}>
-          <strong>{t('aiDetected',lang)}</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · {t('confidence',lang)} {scanResult.confidence}
-          {scanResult.notes && <div style={{color:T.textMuted,marginTop:2}}>{scanResult.notes}</div>}
+        <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13,display:'flex',gap:10,alignItems:'flex-start'}}>
+          {scanPhotoUrl && (
+            <img src={scanPhotoUrl} alt="scan" style={{width:52,height:52,objectFit:'cover',borderRadius:8,flexShrink:0,border:'2px solid #BBF7D0'}}/>
+          )}
+          <div>
+            <strong>{t('aiDetected',lang)}</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · {t('confidence',lang)} {scanResult.confidence}
+            {scanResult.notes && <div style={{color:T.textMuted,marginTop:2}}>{scanResult.notes}</div>}
+          </div>
         </div>
       )}
       {scanResult && scanNoMatch && (
-        <div style={{background:'#FFF7ED',border:`1px solid #FED7AA`,borderRadius:10,padding:'12px 14px',marginBottom:16,fontSize:13}}>
-          <div style={{fontWeight:700,color:'#C2410C',marginBottom:4}}>{t('aiNoMatch',lang)}</div>
-          <div style={{color:T.textMuted,marginBottom:6}}>{t('aiNoMatchSub',lang)}: <strong>"{scanResult.type}"</strong> {t('aiNoMatchSub2',lang)}</div>
-          {scanResult.notes && <div style={{fontSize:12,color:T.textMuted,fontStyle:'italic',marginTop:4}}>"{scanResult.notes}"</div>}
+        <div style={{background:'#FFF7ED',border:`1px solid #FED7AA`,borderRadius:10,padding:'12px 14px',marginBottom:16,fontSize:13,display:'flex',gap:10,alignItems:'flex-start'}}>
+          {scanPhotoUrl && (
+            <img src={scanPhotoUrl} alt="scan" style={{width:52,height:52,objectFit:'cover',borderRadius:8,flexShrink:0,border:'2px solid #FED7AA'}}/>
+          )}
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,color:'#C2410C',marginBottom:4}}>{t('aiNoMatch',lang)}</div>
+            <div style={{color:T.textMuted,marginBottom:6}}>{t('aiNoMatchSub',lang)}: <strong>"{scanResult.type}"</strong> {t('aiNoMatchSub2',lang)}</div>
+            {scanResult.notes && <div style={{fontSize:12,color:T.textMuted,fontStyle:'italic',marginTop:4}}>"{scanResult.notes}"</div>}
+          </div>
         </div>
       )}
 
@@ -1351,6 +1425,7 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
         notes: w.ai_notes,
         no_match: w.ai_no_match,
         custom_price: w.ai_custom_price,
+        photo_url: w.ai_photo_url || null,
       }));
 
     await supabase.from('quotes').insert({
