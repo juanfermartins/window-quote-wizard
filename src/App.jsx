@@ -492,8 +492,8 @@ async function analyzeWindowPhoto(base64Image, products) {
 }
 
 // ─── PDF GENERATOR ────────────────────────────────────────────────────────────
-function generateContractHTML({ customer, windows, serviceLines, total, downPct, company, contractorName, date, signatureData }) {
-  const downAmt = Math.round(total * downPct / 100);
+function generateContractHTML({ customer, windows, serviceLines, total, downPct, company, contractorName, date, signatureData, paymentConfirmed, paymentRef, paymentAmt }) {
+  const downAmt = paymentAmt || Math.round(total * downPct / 100);
   const balance = total - downAmt;
   const windowRows = windows.map(w => `
     <tr>
@@ -503,6 +503,17 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
     </tr>`).join('');
   const serviceRows = serviceLines.map(s => `
     <tr><td>${s.label}</td><td style="text-align:right">$${s.amount.toLocaleString()}</td></tr>`).join('');
+
+  const paymentBanner = paymentConfirmed ? `
+  <div style="background:#f0fdf4;border:2px solid #16a34a;border-radius:8px;padding:16px 20px;margin:24px 0;">
+    <div style="font-size:15px;font-weight:800;color:#16a34a;margin-bottom:8px">✅ PAYMENT CONFIRMED</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+      <div><span style="color:#666">Reference:</span> <strong style="font-family:monospace">${paymentRef}</strong></div>
+      <div><span style="color:#666">Date:</span> <strong>${date}</strong></div>
+      <div><span style="color:#666">Amount Paid:</span> <strong style="color:#16a34a">$${downAmt.toLocaleString()} (${downPct}% down)</strong></div>
+      <div><span style="color:#666">Balance Due:</span> <strong>$${balance.toLocaleString()}</strong></div>
+    </div>
+  </div>` : '';
 
   return `<!DOCTYPE html>
 <html>
@@ -527,8 +538,8 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
   .total-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
   .total-row.grand { font-weight: 800; font-size: 16px; border-top: 2px solid #1a1a1a; padding-top: 10px; margin-top: 4px; }
   .total-row.down { color: #16a34a; font-weight: 700; }
-  .signature-section { margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-  .sig-line { border-top: 1px solid #1a1a1a; padding-top: 8px; font-size: 11px; color: #666; margin-top: 48px; }
+  .signature-section { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .sig-line { border-top: 1px solid #1a1a1a; padding-top: 8px; font-size: 11px; color: #666; margin-top: 8px; }
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #999; text-align: center; }
 </style>
 </head>
@@ -545,6 +556,8 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
       <div class="contract-date">Contract #: WQ-${Date.now().toString().slice(-6)}</div>
     </div>
   </div>
+
+  ${paymentBanner}
 
   <div class="section">
     <div class="section-title">Customer Information</div>
@@ -567,30 +580,28 @@ function generateContractHTML({ customer, windows, serviceLines, total, downPct,
   ${serviceLines.length > 0 ? `
   <div class="section">
     <div class="section-title">Services</div>
-    <table>
-      <tbody>${serviceRows}</tbody>
-    </table>
+    <table><tbody>${serviceRows}</tbody></table>
   </div>` : ''}
 
   <div class="totals">
-    <div class="total-row grand"><span>Total</span><span>$${total.toLocaleString()}</span></div>
+    <div class="total-row grand"><span>Contract Total</span><span>$${total.toLocaleString()}</span></div>
     <div class="total-row down"><span>Down Payment (${downPct}%)</span><span>$${downAmt.toLocaleString()}</span></div>
-    <div class="total-row"><span>Balance Due</span><span>$${balance.toLocaleString()}</span></div>
+    <div class="total-row"><span>Balance Due on Completion</span><span>$${balance.toLocaleString()}</span></div>
   </div>
 
   <div class="signature-section">
     <div>
-      ${signatureData ? `<img src="${signatureData}" style="max-width:200px;max-height:60px;display:block;margin-bottom:8px"/>` : '<div style="height:60px"></div>'}
-      <div class="sig-line">Customer Signature / Date: ${date}</div>
+      ${signatureData ? `<img src="${signatureData}" style="max-width:220px;max-height:70px;display:block"/>` : '<div style="height:70px"></div>'}
+      <div class="sig-line">Customer: ${customer.name} · ${date}</div>
     </div>
     <div>
-      <div style="height:60px"></div>
-      <div class="sig-line">Contractor Signature / Date</div>
+      <div style="height:70px"></div>
+      <div class="sig-line">Contractor: ${contractorName}</div>
     </div>
   </div>
 
   <div class="footer">
-    This contract is binding upon signature. Work will commence upon receipt of down payment.<br>
+    This contract is binding upon signature. Work commences upon receipt of down payment.<br>
     Generated by WindowQuote · ${company?.name || ''}
   </div>
 </body>
@@ -900,141 +911,234 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
 }
 
 // ─── POST-WIZARD ──────────────────────────────────────────────────────────────
-function ContractReady({ customer, total, downPct, windows, serviceLines, company, contractorName, signature, onSign }) {
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [emailError, setEmailError] = useState(null);
 
-  const contractHTML = generateContractHTML({
-    customer, windows, serviceLines, total, downPct,
-    company, contractorName,
-    date: new Date().toLocaleDateString(),
-    signatureData: signature,
-  });
-
-  const downloadPDF = () => {
-    const win = window.open('', '_blank');
-    win.document.write(contractHTML);
-    win.document.close();
-    win.print(); // browser print → Save as PDF
-  };
-
-  const sendEmail = async () => {
-    setSending(true); setEmailError(null);
-    const ok = await sendContractEmail({
-      to: customer.email,
-      customerName: customer.name,
-      contractHTML,
-      company,
-    });
-    setSending(false);
-    if (ok) setSent(true);
-    else setEmailError("Failed to send. Check your Resend key.");
-  };
+// STEP A: Ver contrato (solo lectura) → firmar
+function ContractView({ customer, total, downPct, windows, serviceLines, company, contractorName, onSign }) {
+  const downAmt = Math.round(total * downPct / 100);
+  const balance = total - downAmt;
+  const count = windows.reduce((s,w)=>s+(w.qty||1),0);
 
   return (
-    <div className="step-content fade-up" style={{textAlign:'center',paddingTop:32}}>
-      <div className="success-icon">📄</div>
-      <h2 className="step-title" style={{textAlign:'center'}}>Contract Ready</h2>
-      <p className="step-subtitle" style={{textAlign:'center'}}>Review, download or email to your customer.</p>
+    <div className="step-content fade-up">
+      <h2 className="step-title">Review Contract</h2>
+      <p className="step-subtitle">Read carefully before signing.</p>
 
-      <div className="card" style={{textAlign:'left',marginBottom:16}}>
-        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>WINDOW INSTALLATION CONTRACT</div>
-        <div style={{fontSize:13,color:T.textMuted}}>Customer: <strong style={{color:T.text}}>{customer.name}</strong></div>
-        <div style={{fontSize:13,color:T.textMuted}}>Email: {customer.email}</div>
-        <div style={{fontSize:13,color:T.textMuted}}>Total: <strong style={{color:T.text}}>{fmt(total)}</strong> · Down: {fmt(Math.round(total*downPct/100))} ({downPct}%)</div>
-        <div style={{fontSize:13,color:T.textMuted}}>Windows: {windows.length} item{windows.length!==1?'s':''}</div>
+      {/* Company header */}
+      <div style={{background:T.surfaceAlt,borderRadius:12,padding:'14px 16px',marginBottom:12}}>
+        <div style={{fontWeight:800,fontSize:15}}>{company?.name||'WindowQuote'}</div>
+        {company?.phone&&<div style={{fontSize:12,color:T.textMuted}}>{company.phone}</div>}
+        {company?.address&&<div style={{fontSize:12,color:T.textMuted}}>{company.address}</div>}
       </div>
 
-      {/* Email status */}
-      {sent && (
-        <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>
-          ✅ Contract sent to {customer.email}
-        </div>
-      )}
-      {emailError && (
-        <div style={{background:T.dangerLight,border:`1px solid #FECACA`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.danger}}>
-          ⚠ {emailError}
+      {/* Customer */}
+      <div className="card-sm" style={{marginBottom:10}}>
+        <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Customer</div>
+        <div style={{fontWeight:600}}>{customer.name}</div>
+        <div style={{fontSize:13,color:T.textMuted}}>{customer.email} · {customer.phone}</div>
+        <div style={{fontSize:13,color:T.textMuted}}>{customer.address}, {customer.zip}</div>
+      </div>
+
+      {/* Windows */}
+      <div className="card-sm" style={{marginBottom:10}}>
+        <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Windows ({count} units)</div>
+        {windows.map((w,i)=>(
+          <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'4px 0',borderBottom:`1px solid ${T.border}`}}>
+            <span>{w.qty}× {w.type} · {w.material} · {w.width}"×{w.height}"</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Services */}
+      {serviceLines.length>0&&(
+        <div className="card-sm" style={{marginBottom:10}}>
+          <div style={{fontWeight:600,fontSize:11,color:T.textMuted,textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:6}}>Services</div>
+          {serviceLines.map((s,i)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'4px 0'}}>
+              <span>{s.label}</span><span className="mono">{fmt(s.amount)}</span>
+            </div>
+          ))}
         </div>
       )}
 
-      <div style={{display:'flex',gap:10,marginBottom:10}}>
-        <button className="btn btn-secondary" style={{flex:1}} onClick={downloadPDF}>
-          <Icon name="download"/> PDF
-        </button>
-        <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
-          onClick={sendEmail} disabled={sending||sent}>
-          {sending ? '📤 Sending...' : sent ? '✅ Sent' : '📧 Email'}
-        </button>
+      {/* Totals */}
+      <div className="card-sm" style={{marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+          <span style={{color:T.textMuted}}>Contract Total</span>
+          <span style={{fontWeight:800,fontFamily:'DM Mono',fontSize:16}}>{fmt(total)}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+          <span style={{color:T.success,fontWeight:600}}>Down Payment ({downPct}%)</span>
+          <span style={{fontWeight:700,color:T.success,fontFamily:'DM Mono'}}>{fmt(downAmt)}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:13}}>
+          <span style={{color:T.textMuted}}>Balance Due on Completion</span>
+          <span style={{fontFamily:'DM Mono'}}>{fmt(balance)}</span>
+        </div>
       </div>
+
+      <div style={{fontSize:11,color:T.textMuted,marginBottom:16,lineHeight:1.6,padding:'0 4px'}}>
+        By signing below, customer agrees to the terms of this installation contract, authorizes the down payment, and acknowledges the scope of work described above.
+      </div>
+
       <button className="btn btn-primary btn-full" onClick={onSign}>
-        <Icon name="lock"/> Sign Contract
+        ✍️ Sign Contract
       </button>
     </div>
   );
 }
 
-function SignContract({ customer, onPay }) {
-  const ref=useRef(null);
-  const [signed,setSigned]=useState(false);
-  const [drawing,setDrawing]=useState(false);
+// STEP B: Firmar
+function SignContract({ customer, total, downPct, onPay }) {
+  const ref = useRef(null);
+  const [signed, setSigned] = useState(false);
+  const [drawing, setDrawing] = useState(false);
+  const downAmt = Math.round(total * downPct / 100);
 
   const getPos = (e, canvas) => {
     const r = canvas.getBoundingClientRect();
     if (e.touches) return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top };
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
-
   const startDraw = (e) => { e.preventDefault(); setDrawing(true); const c=ref.current; const ctx=c.getContext('2d'); const p=getPos(e,c); ctx.beginPath(); ctx.moveTo(p.x,p.y); };
   const draw = (e) => {
     if(!drawing) return; e.preventDefault();
     const c=ref.current; const ctx=c.getContext('2d'); const p=getPos(e,c);
-    ctx.lineWidth=2; ctx.lineCap='round'; ctx.strokeStyle=T.text;
+    ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.strokeStyle=T.text;
     ctx.lineTo(p.x,p.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(p.x,p.y);
   };
   const endDraw = (e) => { e.preventDefault(); setDrawing(false); setSigned(true); };
+  const clear = () => { ref.current.getContext('2d').clearRect(0,0,400,150); setSigned(false); };
 
   const handlePay = () => {
     const sigData = ref.current?.toDataURL('image/png');
     onPay(sigData);
   };
 
-  return(
+  return (
     <div className="step-content fade-up">
       <h2 className="step-title">Sign Contract</h2>
-      <p className="step-subtitle">Draw your signature below.</p>
-      <div style={{border:`1.5px solid ${T.border}`,borderRadius:12,overflow:'hidden',background:T.surfaceAlt,position:'relative'}}>
-        <canvas ref={ref} width={350} height={120} style={{display:'block',cursor:'crosshair',touchAction:'none'}}
+      <p className="step-subtitle">Draw your signature to authorize the contract and deposit of <strong>{fmt(downAmt)}</strong>.</p>
+
+      <div style={{border:`2px solid ${signed?T.success:T.border}`,borderRadius:12,overflow:'hidden',background:'#FAFAF9',position:'relative',marginBottom:8,transition:'border-color 0.2s'}}>
+        <canvas ref={ref} width={350} height={150}
+          style={{display:'block',cursor:'crosshair',touchAction:'none',width:'100%'}}
           onMouseDown={startDraw} onMouseUp={endDraw} onMouseMove={draw}
           onTouchStart={startDraw} onTouchEnd={endDraw} onTouchMove={draw}
         />
-        {!signed&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',color:T.textLight,fontSize:13,pointerEvents:'none'}}>Sign here with finger or mouse</div>}
+        {!signed&&<div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',color:T.textLight,fontSize:13,pointerEvents:'none',gap:4}}>
+          <span style={{fontSize:24}}>✍️</span>
+          <span>Sign here with finger or mouse</span>
+        </div>}
       </div>
-      <div style={{display:'flex',justifyContent:'space-between',marginTop:8,marginBottom:20}}>
+
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:20,alignItems:'center'}}>
         <span style={{fontSize:12,color:T.textMuted}}>{customer.name} · {new Date().toLocaleDateString()}</span>
-        <button style={{background:'none',border:'none',fontSize:12,color:T.accent,cursor:'pointer'}} onClick={()=>{ref.current.getContext('2d').clearRect(0,0,400,120);setSigned(false);}}>Clear</button>
+        <button style={{background:'none',border:'none',fontSize:12,color:T.accent,cursor:'pointer'}} onClick={clear}>Clear</button>
       </div>
-      <button className="btn btn-primary btn-full" disabled={!signed} onClick={handlePay}>Confirm → Pay Deposit</button>
+
+      {signed&&<div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13,color:T.success,textAlign:'center'}}>
+        ✅ Signature captured — proceed to payment
+      </div>}
+
+      <button className="btn btn-primary btn-full" disabled={!signed} onClick={handlePay}>
+        💳 Proceed to Payment → {fmt(downAmt)}
+      </button>
     </div>
   );
 }
 
-function PayDeposit({ downAmt, onNewQuote }) {
-  const [paying,setPaying]=useState(false);
-  const [paid,setPaid]=useState(false);
-  if(paid)return(
-    <div className="step-content fade-up" style={{textAlign:'center',paddingTop:60}}>
-      <div className="success-icon">✅</div>
-      <h2 className="step-title" style={{textAlign:'center'}}>Payment Received!</h2>
-      <p className="step-subtitle" style={{textAlign:'center'}}>Deposit of <strong>{fmt(downAmt)}</strong> processed successfully.</p>
-      <button className="btn btn-primary btn-full" style={{marginTop:24}} onClick={onNewQuote}>
-        ＋ Start New Quote
-      </button>
+// STEP C: Pagar depósito → genera PDF con firma + confirmación
+function PayDeposit({ customer, total, downPct, windows, serviceLines, company, contractorName, signature, onNewQuote }) {
+  const [paying, setPaying] = useState(false);
+  const [paid, setPaid] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [emailError, setEmailError] = useState(null);
+  const downAmt = Math.round(total * downPct / 100);
+  const balance = total - downAmt;
+  const paymentRef = `PAY-${Date.now().toString().slice(-6)}`;
+  const paymentDate = new Date().toLocaleDateString();
+
+  const contractHTML = generateContractHTML({
+    customer, windows, serviceLines, total, downPct,
+    company, contractorName,
+    date: paymentDate,
+    signatureData: signature,
+    paymentConfirmed: paid,
+    paymentRef,
+    paymentAmt: downAmt,
+  });
+
+  const downloadPDF = () => {
+    const win = window.open('', '_blank');
+    win.document.write(contractHTML);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+  };
+
+  const sendEmail = async () => {
+    setSending(true); setEmailError(null);
+    const ok = await sendContractEmail({ to: customer.email, customerName: customer.name, contractHTML, company });
+    setSending(false);
+    if (ok) setSent(true);
+    else setEmailError("Failed to send. Check Resend configuration.");
+  };
+
+  if (paid) return (
+    <div className="step-content fade-up" style={{textAlign:'center',paddingTop:24}}>
+      <div className="success-icon" style={{width:72,height:72,fontSize:32}}>✅</div>
+      <h2 className="step-title" style={{textAlign:'center'}}>Payment Confirmed!</h2>
+      <p className="step-subtitle" style={{textAlign:'center'}}>Deposit of <strong>{fmt(downAmt)}</strong> received.</p>
+
+      {/* Payment receipt card */}
+      <div style={{background:T.successLight,border:`1.5px solid #BBF7D0`,borderRadius:14,padding:'16px',marginBottom:16,textAlign:'left'}}>
+        <div style={{fontWeight:700,fontSize:13,marginBottom:10,color:T.success}}>PAYMENT RECEIPT</div>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
+          <span style={{color:T.textMuted}}>Reference</span><span style={{fontWeight:600,fontFamily:'DM Mono'}}>{paymentRef}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
+          <span style={{color:T.textMuted}}>Date</span><span>{paymentDate}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
+          <span style={{color:T.textMuted}}>Customer</span><span style={{fontWeight:600}}>{customer.name}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:13,marginBottom:4}}>
+          <span style={{color:T.textMuted}}>Down Payment ({downPct}%)</span>
+          <span style={{fontWeight:800,fontFamily:'DM Mono',color:T.success}}>{fmt(downAmt)}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:13,paddingTop:8,borderTop:`1px solid #BBF7D0`}}>
+          <span style={{color:T.textMuted}}>Balance Due on Completion</span>
+          <span style={{fontFamily:'DM Mono'}}>{fmt(balance)}</span>
+        </div>
+      </div>
+
+      {/* Signature preview */}
+      {signature && (
+        <div style={{border:`1px solid ${T.border}`,borderRadius:10,padding:'10px',marginBottom:16,background:T.surfaceAlt}}>
+          <div style={{fontSize:11,color:T.textMuted,marginBottom:6}}>Customer Signature</div>
+          <img src={signature} style={{maxHeight:60,maxWidth:'100%'}} alt="signature"/>
+          <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>{customer.name} · {paymentDate}</div>
+        </div>
+      )}
+
+      {sent&&<div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>✅ Contract sent to {customer.email}</div>}
+      {emailError&&<div style={{background:T.dangerLight,border:`1px solid #FECACA`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.danger}}>⚠ {emailError}</div>}
+
+      <div style={{display:'flex',gap:10,marginBottom:10}}>
+        <button className="btn btn-secondary" style={{flex:1}} onClick={downloadPDF}><Icon name="download"/> PDF</button>
+        <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}} onClick={sendEmail} disabled={sending||sent}>
+          {sending?'📤 Sending...':sent?'✅ Sent':'📧 Email'}
+        </button>
+      </div>
+      <button className="btn btn-primary btn-full" onClick={onNewQuote}>＋ New Quote</button>
     </div>
   );
-  return(
+
+  return (
     <div className="step-content fade-up">
       <h2 className="step-title">Pay Deposit</h2>
+      <p className="step-subtitle">Contract signed ✅ — complete the down payment to confirm the project.</p>
+
       <div className="stripe-card">
         <div style={{fontSize:11,opacity:0.6,marginBottom:12,letterSpacing:1,textTransform:'uppercase'}}>Powered by Stripe</div>
         <div style={{background:'rgba(255,255,255,0.1)',borderRadius:8,padding:'12px 14px',marginBottom:10,letterSpacing:2}}>4242 4242 4242 4242</div>
@@ -1043,12 +1147,18 @@ function PayDeposit({ downAmt, onNewQuote }) {
           <div style={{flex:1,background:'rgba(255,255,255,0.1)',borderRadius:8,padding:'10px 12px'}}>•••</div>
         </div>
       </div>
-      <div className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <div><div style={{fontWeight:600}}>Deposit</div><div style={{fontSize:12,color:T.textMuted}}>Due now</div></div>
+
+      <div className="card" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div>
+          <div style={{fontWeight:600}}>Down Payment</div>
+          <div style={{fontSize:12,color:T.textMuted}}>{downPct}% of {fmt(total)}</div>
+        </div>
         <div style={{fontWeight:800,fontSize:22,fontFamily:'DM Mono'}}>{fmt(downAmt)}</div>
       </div>
-      <button className="btn btn-accent btn-full" disabled={paying} onClick={()=>{setPaying(true);setTimeout(()=>{setPaying(false);setPaid(true);},2500);}}>
-        {paying?"Processing...":`Pay ${fmt(downAmt)}`}
+
+      <button className="btn btn-accent btn-full" disabled={paying}
+        onClick={()=>{setPaying(true);setTimeout(()=>{setPaying(false);setPaid(true);},2500);}}>
+        {paying?'Processing...':`Confirm Payment ${fmt(downAmt)}`}
       </button>
     </div>
   );
@@ -1096,24 +1206,28 @@ function Wizard({ appData, auth }) {
   if(loading)return <LoadingScreen/>;
   const cu={id:auth.user?.id,email:auth.user?.email,full_name:auth.profile?.full_name,company_id:auth.companyId,company_name:auth.company?.name};
 
-  if(post==="pay")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><PayDeposit downAmt={Math.round(total*downPct/100)} onNewQuote={()=>{setPost(null);setStep(1);setCustomer({name:"",email:"",phone:"",address:"",zip:""});setWindows([]);setSelected([]);setSignature(null);}}/></div>;
-  if(post==="sign")return<div className="wizard-shell"><div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div><SignContract customer={customer} onPay={(sig)=>{setSignature(sig);setPost("pay");}}/></div>;
-  if(post==="contract"){
-    const count=windows.reduce((s,w)=>s+(w.qty||1),0);
-    const serviceLines=dbServices.filter(s=>selected.includes(s.id)).map(s=>({
-      label:s.name,
-      amount:s.pricing_model==='per_window'?s.price*count:s.price
+  const resetWizard = () => { setPost(null);setStep(1);setCustomer({name:"",email:"",phone:"",address:"",zip:""});setWindows([]);setSelected([]);setSignature(null);setTotal(0); };
+
+  const navBar = (
+    <div className="top-nav">
+      <div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div>
+    </div>
+  );
+
+  if (post === "contract" || post === "sign" || post === "pay") {
+    const count = windows.reduce((s,w)=>s+(w.qty||1),0);
+    const serviceLines = dbServices.filter(s=>selected.includes(s.id)).map(s=>({
+      label: s.name,
+      amount: s.pricing_model==='per_window' ? s.price*count : s.price
     }));
-    return(
+    const sharedProps = { customer, total, downPct, windows, serviceLines, company: auth.company, contractorName: auth.profile?.full_name||auth.user?.email };
+
+    return (
       <div className="wizard-shell">
-        <div className="top-nav"><div className="logo"><div className="logo-icon"><Icon name="window" size={14}/></div>{auth.company?.name||"WindowQuote"}</div></div>
-        <ContractReady
-          customer={customer} total={total} downPct={downPct}
-          windows={windows} serviceLines={serviceLines}
-          company={auth.company} contractorName={auth.profile?.full_name||auth.user?.email}
-          signature={signature}
-          onSign={()=>setPost("sign")}
-        />
+        {navBar}
+        {post==="contract" && <ContractView {...sharedProps} onSign={()=>setPost("sign")}/>}
+        {post==="sign"     && <SignContract {...sharedProps} onPay={(sig)=>{setSignature(sig);setPost("pay");}}/>}
+        {post==="pay"      && <PayDeposit  {...sharedProps} signature={signature} onNewQuote={resetWizard}/>}
       </div>
     );
   }
