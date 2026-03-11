@@ -69,6 +69,16 @@ const T18N = {
   aiRawDesc:        { en: 'AI description:', es: 'Descripción IA:' },
   aiScanned:        { en: '📷 AI Scanned', es: '📷 Escaneado por IA' },
   measureTip:       { en: '💡 Tip: place a credit card, coin, or ruler next to the window for more accurate measurements.', es: '💡 Tip: coloca una tarjeta de crédito, moneda o regla junto a la ventana para medidas más precisas.' },
+  photo1Label:      { en: '📷 Photo 1 — Full Window', es: '📷 Foto 1 — Ventana Completa' },
+  photo1Hint:       { en: 'Take a photo of the entire window from a distance.', es: 'Toma una foto de la ventana completa desde lejos.' },
+  photo1Done:       { en: '✅ Window photo captured', es: '✅ Foto de ventana capturada' },
+  photo2Label:      { en: '📏 Photo 2 — Close-up with Card', es: '📏 Foto 2 — Acercamiento con Tarjeta' },
+  photo2Hint:       { en: 'Place a credit card flat against the frame and take a close-up. This lets AI calculate exact measurements.', es: 'Coloca una tarjeta de crédito plana sobre el marco y toma un acercamiento. Esto permite que la IA calcule medidas exactas.' },
+  photo2Done:       { en: '✅ Reference photo captured — calculating precise measurements...', es: '✅ Foto de referencia capturada — calculando medidas precisas...' },
+  photo2Skip:       { en: 'Skip — use estimate', es: 'Omitir — usar estimado' },
+  takingPhoto2:     { en: '📏 Take close-up with card', es: '📏 Tomar acercamiento con tarjeta' },
+  measuringPrecise: { en: '📐 Calculating precise measurements...', es: '📐 Calculando medidas precisas...' },
+  preciseMeasured:  { en: '✅ Precise measurements calculated!', es: '✅ ¡Medidas precisas calculadas!' },
   refUsed:          { en: '📏 Measured using:', es: '📏 Medido usando:' },
   refEstimate:      { en: '📐 Estimated (no reference)', es: '📐 Estimado (sin referencia)' },
   confidence:       { en: 'Confidence:',         es: 'Confianza:' },
@@ -845,6 +855,25 @@ async function analyzeWindowPhoto(base64Image, products) {
   } catch(e) { console.error("Edge scan error:", e); return null; }
 }
 
+// Send close-up reference photo + window proportions → get precise measurements
+async function analyzeReferencePhoto(base64Ref, windowProportions) {
+  try {
+    const response = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${EDGE_ANON}` },
+      body: JSON.stringify({
+        action: "measure",
+        image: base64Ref,
+        window_width_ratio: windowProportions.widthRatio,
+        window_height_ratio: windowProportions.heightRatio,
+      }),
+    });
+    const text = await response.text();
+    if (!response.ok) return null;
+    return JSON.parse(text);
+  } catch(e) { console.error("Reference measure error:", e); return null; }
+}
+
 // ─── FUZZY PRODUCT MATCH ─────────────────────────────────────────────────────
 // Returns { exact, best, score } where score 0-1 (1=perfect)
 function fuzzyMatch(aiType, products) {
@@ -1125,9 +1154,14 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
   const [scanning,setScanning] = useState(false);
   const [scanResult,setScanResult] = useState(null);
   const [scanNoMatch,setScanNoMatch] = useState(false);
-  const [scanPhotoUrl,setScanPhotoUrl] = useState(null);   // uploaded compressed photo URL
+  const [scanPhotoUrl,setScanPhotoUrl] = useState(null);
   const [uploading,setUploading] = useState(false);
+  // 2-photo flow
+  const [scanPhase,setScanPhase] = useState('idle');   // idle | photo1_done | measuring
+  const [photo1Base64,setPhoto1Base64] = useState(null);
+  const [photo1Proportions,setPhoto1Proportions] = useState(null);
   const fileRef = useRef(null);
+  const refFileRef = useRef(null);
 
   const add = () => {
     if(!form.type) return;
@@ -1148,32 +1182,34 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
     setForm(empty);setShow(false);setScanResult(null);setScanNoMatch(false);
   };
 
+  // PHOTO 1: full window shot — identify type + proportions
   const handleScan = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setScanning(true); setScanResult(null); setScanPhotoUrl(null);
+    setScanPhase('idle'); setPhoto1Base64(null); setPhoto1Proportions(null);
     try {
-      // Run AI analysis + photo compression+upload in parallel
       const base64Promise = new Promise((res,rej) => {
         const reader = new FileReader();
         reader.onload = () => res(reader.result.split(',')[1]);
         reader.onerror = rej;
         reader.readAsDataURL(file);
       });
-
-      // Generate a temp ref for the file path (will be replaced by quote id later)
       const tempRef = `tmp_${Date.now()}`;
-
       const [base64, photoUrl] = await Promise.all([
         base64Promise,
         uploadScanPhoto(file, tempRef).catch(() => null),
       ]);
-
       if (photoUrl) setScanPhotoUrl(photoUrl);
 
       const result = await analyzeWindowPhoto(base64, products);
       if (result) {
         setScanResult(result);
+        // Store base64 + proportions for optional photo 2
+        setPhoto1Base64(base64);
+        setPhoto1Proportions({ widthRatio: result.width / (result.height || 1), heightRatio: 1 });
+        setScanPhase('photo1_done');
+
         const { exact, best, score } = fuzzyMatch(result.type, products);
         if (exact) {
           setForm(f => ({ ...f, type: exact.name, width: result.width||36, height: result.height||48, _aiNoMatch: false, _aiRawType: result.type, _photoUrl: photoUrl }));
@@ -1189,6 +1225,36 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
       }
     } catch(err) { console.error('Scan error:', err); }
     setScanning(false);
+    e.target.value = '';
+  };
+
+  // PHOTO 2: close-up with credit card → precise measurements
+  const handleRefScan = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanPhase('measuring');
+    try {
+      const base64 = await new Promise((res,rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const measured = await analyzeReferencePhoto(base64, photo1Proportions || { widthRatio: 1, heightRatio: 1 });
+      if (measured && measured.width && measured.height) {
+        setForm(f => ({ ...f, width: measured.width, height: measured.height }));
+        setScanResult(r => ({ ...r,
+          width: measured.width,
+          height: measured.height,
+          measured_with_reference: true,
+          reference_object: measured.reference_object || 'credit card',
+          confidence: 'high',
+        }));
+        setScanPhase('precise_done');
+      } else {
+        setScanPhase('photo1_done'); // fallback — keep estimate
+      }
+    } catch(err) { console.error('Ref scan error:', err); setScanPhase('photo1_done'); }
     e.target.value = '';
   };
 
@@ -1265,9 +1331,40 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
         </div>
       ))}
 
-      {/* file input always in DOM */}
+      {/* file inputs always in DOM */}
       <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp"
         style={{display:'none'}} onChange={handleScan}/>
+      <input ref={refFileRef} type="file" accept="image/jpeg,image/png,image/webp"
+        style={{display:'none'}} onChange={handleRefScan}/>
+
+      {/* Photo 2 prompt — appears after photo 1 is done, inside the form */}
+      {scanPhase === 'photo1_done' && show && (
+        <div style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:10,padding:'12px 14px',marginBottom:14,fontSize:13}}>
+          <div style={{fontWeight:700,color:'#1D4ED8',marginBottom:4}}>{t('photo2Label',lang)}</div>
+          <div style={{color:T.textMuted,marginBottom:10,fontSize:12}}>{t('photo2Hint',lang)}</div>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-primary btn-sm" style={{flex:2,fontSize:12}}
+              onClick={()=>refFileRef.current?.click()}>
+              📏 {t('takingPhoto2',lang)}
+            </button>
+            <button className="btn btn-secondary btn-sm" style={{flex:1,fontSize:11,color:T.textMuted}}
+              onClick={()=>setScanPhase('skipped')}>
+              {t('photo2Skip',lang)}
+            </button>
+          </div>
+        </div>
+      )}
+      {scanPhase === 'measuring' && show && (
+        <div style={{background:'#EFF6FF',border:'1px solid #BFDBFE',borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:13,display:'flex',alignItems:'center',gap:10}}>
+          <div className="spinner" style={{width:16,height:16,flexShrink:0}}/>
+          <span style={{color:'#1D4ED8',fontWeight:600}}>{t('measuringPrecise',lang)}</span>
+        </div>
+      )}
+      {scanPhase === 'precise_done' && show && (
+        <div style={{background:T.successLight,border:'1px solid #BBF7D0',borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:13,fontWeight:600,color:T.success}}>
+          {t('preciseMeasured',lang)} {form.width}"×{form.height}"
+        </div>
+      )}
 
       {!show && (
         <>
