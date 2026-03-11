@@ -623,6 +623,45 @@ async function sendContractEmail({ to, customerName, contractHTML, company }) {
   } catch(e) { console.error("Edge email error:", e); return false; }
 }
 
+// ─── RESET PASSWORD MODAL ─────────────────────────────────────────────────────
+function ResetPasswordModal({ contractor, onClose, onSuccess }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const email = contractor.email || contractor.user_email || '';
+
+  const send = async () => {
+    setSending(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    setSending(false);
+    if (!error) { setSent(true); setTimeout(() => { onSuccess(); onClose(); }, 1500); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:360}}>
+        <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>🔑 Reset Password</div>
+        <p style={{fontSize:13,color:T.textMuted,marginBottom:16}}>
+          A password reset email will be sent to <strong>{email}</strong>.<br/>
+          The contractor will receive a link to set a new password.
+        </p>
+        {sent && (
+          <div style={{background:T.successLight,border:`1px solid #BBF7D0`,borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:T.success}}>
+            ✅ Reset email sent to {email}
+          </div>
+        )}
+        <div style={{display:'flex',gap:10}}>
+          <button className="btn btn-secondary" style={{flex:1}} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{flex:2}} disabled={sending||sent} onClick={send}>
+            {sending ? 'Sending...' : sent ? '✅ Sent' : '📧 Send Reset Email'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── EDIT CONTRACTOR NAME MODAL ───────────────────────────────────────────────
 function EditNameModal({ contractor, onClose, onSave }) {
   const [name, setName] = useState(contractor.full_name || '');
@@ -1810,6 +1849,7 @@ function CompanyAdminPanel({ appData, auth }) {
   const [selQuote, setSelQuote] = useState(null);
   const [addQuotesFor, setAddQuotesFor] = useState(null);
   const [editNameFor, setEditNameFor] = useState(null);
+  const [resetPwFor, setResetPwFor] = useState(null);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -1867,6 +1907,13 @@ function CompanyAdminPanel({ appData, auth }) {
             setContractors(cs => cs.map(c => c.id === id ? { ...c, full_name: name } : c));
             setToast({ message: "Name updated ✓", type: "success" });
           }}
+        />
+      )}
+      {resetPwFor && (
+        <ResetPasswordModal
+          contractor={resetPwFor}
+          onClose={() => setResetPwFor(null)}
+          onSuccess={() => setToast({ message: "Password reset email sent ✓", type: "success" })}
         />
       )}
       {addQuotesFor && (
@@ -1972,19 +2019,23 @@ function CompanyAdminPanel({ appData, auth }) {
                         {last ? new Date(last.created_at).toLocaleDateString() : 'No activity'}
                       </td>
                       <td>
-                        {!hasPlan ? (
-                          // No plan → Assign Plan button (opens modal in upgrade mode)
-                          <button className="btn btn-primary btn-sm" onClick={() => setAddQuotesFor({ ...u, _forceMode: 'upgrade' })}
-                            style={{ fontSize: 12 }}>
-                            🚀 Assign Plan
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                          {!hasPlan ? (
+                            <button className="btn btn-primary btn-sm" onClick={() => setAddQuotesFor({ ...u, _forceMode: 'upgrade' })}
+                              style={{ fontSize: 12 }}>
+                              🚀 Assign Plan
+                            </button>
+                          ) : (
+                            <button className="btn btn-accent btn-sm" onClick={() => setAddQuotesFor(u)}
+                              style={{ fontSize: 12 }}>
+                              + Add Quotes
+                            </button>
+                          )}
+                          <button className="btn btn-secondary btn-sm" onClick={() => setResetPwFor(u)}
+                            style={{ fontSize: 12 }} title="Send password reset email">
+                            🔑 Reset PW
                           </button>
-                        ) : (
-                          // Has plan → Add Quotes button
-                          <button className="btn btn-accent btn-sm" onClick={() => setAddQuotesFor(u)}
-                            style={{ fontSize: 12 }}>
-                            + Add Quotes
-                          </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
