@@ -726,6 +726,7 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
             style={{display:'none'}} onChange={handleScan}/>
         </div>
       )}
+      {show && (
         <div className="card fade-up">
           <div style={{fontWeight:700,fontSize:15,marginBottom:16}}>{editIdx!==null?"Edit Window":"New Window"}</div>
           <div className="field"><label className="label">Type</label>
