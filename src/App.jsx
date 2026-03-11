@@ -155,7 +155,11 @@ const Icon = ({ name, size = 16 }) => {
 };
 
 const StatusBadge = ({ status }) => {
-  const map = { draft:"badge-gray", finalized:"badge-blue", signed:"badge-orange", paid:"badge-green" };
+  const map = {
+    draft: "badge-gray", finalized: "badge-blue",
+    pending: "badge-orange", sent: "badge-blue",
+    signed: "badge-purple", paid: "badge-green", cancelled: "badge-red"
+  };
   return <span className={`badge ${map[status]||"badge-gray"}`}>{status?.charAt(0).toUpperCase()+status?.slice(1)}</span>;
 };
 const RoleBadge = ({ role }) => {
@@ -442,7 +446,7 @@ function QuoteDetailModal({ quote, onClose, onStatusChange }) {
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <span style={{fontSize:13,color:T.textMuted}}>Status:</span>
           <select className="select" style={{fontSize:13}} value={quote.status} onChange={e=>onStatusChange(quote.id,e.target.value)}>
-            {['draft','finalized','signed','paid'].map(s=><option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
+            {['draft','pending','sent','finalized','signed','paid','cancelled'].map(s=><option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
           </select>
         </div>
       </div>
@@ -640,7 +644,7 @@ function ResetPasswordModal({ contractor, onClose, onSuccess }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:360}}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{maxWidth:360}}>
         <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>🔑 Reset Password</div>
         <p style={{fontSize:13,color:T.textMuted,marginBottom:16}}>
           A password reset email will be sent to <strong>{email}</strong>.<br/>
@@ -1095,29 +1099,30 @@ function PayDeposit({ customer, total, downPct, windows, serviceLines, company, 
   const [emailError, setEmailError] = useState(null);
   const downAmt = Math.round(total * downPct / 100);
   const balance = total - downAmt;
-  const paymentRef = `PAY-${Date.now().toString().slice(-6)}`;
-  const paymentDate = new Date().toLocaleDateString();
+  // Stable values — must not change across re-renders
+  const paymentRef = useRef(`PAY-${Date.now().toString().slice(-6)}`).current;
+  const paymentDate = useRef(new Date().toLocaleDateString()).current;
 
-  const contractHTML = generateContractHTML({
+  const buildHTML = (isConfirmed) => generateContractHTML({
     customer, windows, serviceLines, total, downPct,
     company, contractorName,
     date: paymentDate,
     signatureData: signature,
-    paymentConfirmed: paid,
+    paymentConfirmed: isConfirmed,
     paymentRef,
     paymentAmt: downAmt,
   });
 
   const downloadPDF = () => {
     const win = window.open('', '_blank');
-    win.document.write(contractHTML);
+    win.document.write(buildHTML(paid));
     win.document.close();
     setTimeout(() => win.print(), 500);
   };
 
   const sendEmail = async () => {
     setSending(true); setEmailError(null);
-    const ok = await sendContractEmail({ to: customer.email, customerName: customer.name, contractHTML, company });
+    const ok = await sendContractEmail({ to: customer.email, customerName: customer.name, contractHTML: buildHTML(true), company });
     setSending(false);
     if (ok) setSent(true);
     else setEmailError("Failed to send. Check Resend configuration.");
@@ -1840,9 +1845,360 @@ function AddQuotesModal({ contractor, companyId, companyName, adminId, onClose, 
   );
 }
 
+// ─── TEAM DASHBOARD ───────────────────────────────────────────────────────────
+function TeamDashboard({ quotes, contractors }) {
+  const [filterContractor, setFilterContractor] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterMonth, setFilterMonth] = useState("all");
+  const [sortBy, setSortBy] = useState("date_desc");
+
+  // ── derived data ──
+  const statuses = ["pending", "sent", "signed", "paid", "cancelled"];
+
+  // Per-contractor stats
+  const contractorStats = contractors.map(c => {
+    const cq = quotes.filter(q => q.created_by === c.id);
+    const paid = cq.filter(q => q.status === "paid");
+    const signed = cq.filter(q => q.status === "signed" || q.status === "paid");
+    const totalRev = paid.reduce((s, q) => s + (q.total || 0), 0);
+    const closeRate = cq.length > 0 ? Math.round((signed.length / cq.length) * 100) : 0;
+
+    // avg days from creation to today for signed/paid quotes (quote age at close)
+    // Since there's no signed_at column, we measure how old quotes are when signed
+    // This is a reasonable proxy for time-to-close
+    const avgDays = signed.length > 0
+      ? Math.round(signed.reduce((s, q) => {
+          const created = new Date(q.created_at);
+          const now = new Date();
+          return s + (now - created) / (1000 * 60 * 60 * 24);
+        }, 0) / signed.length)
+      : null;
+
+    return { ...c, cq, totalRev, closeRate, avgDays, signedCount: signed.length, paidCount: paid.length };
+  });
+
+  // Monthly trend (last 6 months)
+  const now = new Date();
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return {
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      label: d.toLocaleString('default', { month: 'short' }),
+      year: d.getFullYear(),
+      month: d.getMonth(),
+    };
+  });
+
+  const monthlyData = months.map(m => {
+    const mq = quotes.filter(q => {
+      const d = new Date(q.created_at);
+      return d.getFullYear() === m.year && d.getMonth() === m.month;
+    });
+    return {
+      ...m,
+      total: mq.length,
+      paid: mq.filter(q => q.status === 'paid').length,
+      revenue: mq.filter(q => q.status === 'paid').reduce((s, q) => s + (q.total || 0), 0),
+    };
+  });
+
+  const maxMonthly = Math.max(...monthlyData.map(m => m.total), 1);
+
+  // Available months for filter
+  const availableMonths = [...new Set(quotes.map(q => {
+    const d = new Date(q.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }))].sort().reverse();
+
+  // Filtered quotes for detail table
+  const filtered = quotes.filter(q => {
+    const monthKey = `${new Date(q.created_at).getFullYear()}-${String(new Date(q.created_at).getMonth() + 1).padStart(2, '0')}`;
+    return (
+      (filterContractor === "all" || q.created_by === filterContractor) &&
+      (filterStatus === "all" || q.status === filterStatus) &&
+      (filterMonth === "all" || monthKey === filterMonth)
+    );
+  }).sort((a, b) => {
+    if (sortBy === "date_desc") return new Date(b.created_at) - new Date(a.created_at);
+    if (sortBy === "date_asc") return new Date(a.created_at) - new Date(b.created_at);
+    if (sortBy === "total_desc") return (b.total || 0) - (a.total || 0);
+    if (sortBy === "total_asc") return (a.total || 0) - (b.total || 0);
+    return 0;
+  });
+
+  // Global KPIs
+  const totalRevenue = quotes.filter(q => q.status === 'paid').reduce((s, q) => s + (q.total || 0), 0);
+  const totalSigned = quotes.filter(q => q.status === 'signed' || q.status === 'paid').length;
+  const overallClose = quotes.length > 0 ? Math.round((totalSigned / quotes.length) * 100) : 0;
+  const avgQuoteValue = quotes.length > 0 ? quotes.reduce((s, q) => s + (q.total || 0), 0) / quotes.length : 0;
+
+  const statusColors = {
+    pending: T.warning,
+    sent: T.accent,
+    signed: "#7C3AED",
+    paid: T.success,
+    cancelled: T.textLight,
+  };
+
+  return (
+    <div className="fade-up">
+      {/* ── Global KPI cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 28 }}>
+        {[
+          { label: "Total Quotes", value: quotes.length, icon: "📋", color: T.accent, bg: T.accentLight },
+          { label: "Revenue (Paid)", value: fmt(totalRevenue), icon: "💰", color: T.success, bg: T.successLight },
+          { label: "Close Rate", value: `${overallClose}%`, icon: "🎯", color: "#7C3AED", bg: "#F5F3FF" },
+          { label: "Avg Quote Value", value: fmt(avgQuoteValue), icon: "📈", color: T.warning, bg: T.warningLight },
+          { label: "Active Contractors", value: contractors.length, icon: "👷", color: T.text, bg: T.surfaceAlt },
+        ].map(k => (
+          <div key={k.label} style={{ background: k.bg, borderRadius: 14, padding: '16px 14px', border: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>{k.icon}</div>
+            <div style={{ fontWeight: 800, fontSize: 20, fontFamily: 'DM Mono', color: k.color, lineHeight: 1 }}>{k.value}</div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
+        {/* ── Monthly trend chart ── */}
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px' }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: T.text }}>📅 Cotizaciones por mes (últimos 6 meses)</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 100 }}>
+            {monthlyData.map(m => (
+              <div key={m.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{ fontSize: 10, color: T.textMuted, fontFamily: 'DM Mono', fontWeight: 700 }}>{m.total || ''}</div>
+                <div style={{ width: '100%', position: 'relative', height: 70, display: 'flex', alignItems: 'flex-end' }}>
+                  <div style={{
+                    width: '100%',
+                    height: `${Math.max(4, (m.total / maxMonthly) * 70)}px`,
+                    background: `linear-gradient(180deg, ${T.accent} 0%, ${T.accentLight} 100%)`,
+                    borderRadius: '4px 4px 0 0',
+                    position: 'relative',
+                  }}>
+                    {m.paid > 0 && (
+                      <div style={{
+                        position: 'absolute', bottom: 0, left: 0, right: 0,
+                        height: `${(m.paid / Math.max(m.total, 1)) * 100}%`,
+                        background: T.success, borderRadius: '4px 4px 0 0', opacity: 0.8,
+                      }} />
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: T.textMuted }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: T.textMuted }}>
+              <div style={{ width: 10, height: 10, background: T.accent, borderRadius: 2 }} /> Cotizaciones
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: T.textMuted }}>
+              <div style={{ width: 10, height: 10, background: T.success, borderRadius: 2 }} /> Pagadas
+            </div>
+          </div>
+        </div>
+
+        {/* ── Per-contractor cards ── */}
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px' }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16, color: T.text }}>👷 Rendimiento por contractor</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 200, overflowY: 'auto' }}>
+            {contractorStats.length === 0 && (
+              <div style={{ color: T.textMuted, fontSize: 13, textAlign: 'center', padding: 20 }}>No hay contractors aún</div>
+            )}
+            {contractorStats.map(c => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: T.surfaceAlt, borderRadius: 10 }}>
+                <div className="avatar" style={{ background: T.accent, width: 30, height: 30, fontSize: 12, flexShrink: 0 }}>
+                  {(c.full_name || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {c.full_name || 'Sin nombre'}
+                  </div>
+                  <div style={{ fontSize: 11, color: T.textMuted }}>{c.cq.length} cotizaciones · {c.closeRate}% cierre</div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontWeight: 700, fontFamily: 'DM Mono', fontSize: 13, color: T.success }}>{fmt(c.totalRev)}</div>
+                  {c.avgDays !== null && (
+                    <div style={{ fontSize: 10, color: T.textMuted }}>~{c.avgDays}d to sign</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Contractor ranking table ── */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px', marginBottom: 28 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>🏆 Ranking de contractors</div>
+        <div className="table-wrap" style={{ margin: 0 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Contractor</th>
+                <th>Cotizaciones</th>
+                <th>Firmadas</th>
+                <th>Pagadas</th>
+                <th>Tasa cierre</th>
+                <th>Revenue total</th>
+                <th>Ticket prom.</th>
+                <th>Tiempo prom. firma</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...contractorStats].sort((a, b) => b.totalRev - a.totalRev).map((c, i) => (
+                <tr key={c.id}>
+                  <td>
+                    <span style={{ fontWeight: 800, color: i === 0 ? '#D97706' : i === 1 ? T.textMuted : T.textLight }}>
+                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="avatar" style={{ background: T.accent, width: 26, height: 26, fontSize: 11 }}>
+                        {(c.full_name || 'U').charAt(0).toUpperCase()}
+                      </div>
+                      <span style={{ fontWeight: 600 }}>{c.full_name || 'Sin nombre'}</span>
+                    </div>
+                  </td>
+                  <td><span className="mono" style={{ fontWeight: 700 }}>{c.cq.length}</span></td>
+                  <td><span className="mono" style={{ color: '#7C3AED', fontWeight: 600 }}>{c.signedCount}</span></td>
+                  <td><span className="mono" style={{ color: T.success, fontWeight: 600 }}>{c.paidCount}</span></td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 50, height: 6, background: T.surfaceAlt, borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ width: `${c.closeRate}%`, height: '100%', background: c.closeRate >= 60 ? T.success : c.closeRate >= 30 ? T.warning : T.danger, borderRadius: 3 }} />
+                      </div>
+                      <span className="mono" style={{ fontSize: 12 }}>{c.closeRate}%</span>
+                    </div>
+                  </td>
+                  <td><span className="mono" style={{ fontWeight: 700, color: T.success }}>{fmt(c.totalRev)}</span></td>
+                  <td><span className="mono" style={{ fontSize: 13 }}>{c.paidCount > 0 ? fmt(c.totalRev / c.paidCount) : '—'}</span></td>
+                  <td style={{ color: T.textMuted, fontSize: 12 }}>{c.avgDays !== null ? `${c.avgDays} días` : '—'}</td>
+                </tr>
+              ))}
+              {contractorStats.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>No hay datos aún</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Detailed quote list with filters ── */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>📋 Detalle de cotizaciones ({filtered.length})</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <select value={filterContractor} onChange={e => setFilterContractor(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
+              <option value="all">👷 Todos los contractors</option>
+              {contractors.map(c => <option key={c.id} value={c.id}>{c.full_name || 'Sin nombre'}</option>)}
+            </select>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
+              <option value="all">🏷 Todos los estados</option>
+              {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
+              <option value="all">📅 Todos los meses</option>
+              {availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+              style={{ fontSize: 12, padding: '5px 8px', border: `1px solid ${T.border}`, borderRadius: 8, background: T.surfaceAlt, color: T.text, cursor: 'pointer' }}>
+              <option value="date_desc">↓ Más reciente</option>
+              <option value="date_asc">↑ Más antiguo</option>
+              <option value="total_desc">↓ Mayor valor</option>
+              <option value="total_asc">↑ Menor valor</option>
+            </select>
+          </div>
+        </div>
+        <div className="table-wrap" style={{ margin: 0 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Contractor</th>
+                <th>Fecha</th>
+                <th>Ventanas</th>
+                <th>Total</th>
+                <th>Depósito</th>
+                <th>Estado</th>
+                <th>Días desde cotiz.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(q => {
+                const daysSince = Math.floor((new Date() - new Date(q.created_at)) / (1000 * 60 * 60 * 24));
+                const deposit = Math.round((q.total || 0) * (q.down_pct || 20) / 100);
+                const windowCount = Array.isArray(q.windows) ? q.windows.reduce((s, w) => s + (w.qty || 1), 0) : (q.windows?.length || 0);
+                return (
+                  <tr key={q.id}>
+                    <td>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{q.customer_name}</div>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>{q.address || q.zip}</div>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div className="avatar" style={{ background: T.accent, width: 22, height: 22, fontSize: 9 }}>
+                          {(q.created_by_name || 'U').charAt(0).toUpperCase()}
+                        </div>
+                        <span style={{ fontSize: 12 }}>{q.created_by_name || 'Unknown'}</span>
+                      </div>
+                    </td>
+                    <td style={{ color: T.textMuted, fontSize: 12, whiteSpace: 'nowrap' }}>
+                      {new Date(q.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span className="mono" style={{ fontSize: 13 }}>{windowCount || '—'}</span>
+                    </td>
+                    <td><span className="mono" style={{ fontWeight: 700 }}>{fmt(q.total)}</span></td>
+                    <td><span className="mono" style={{ fontSize: 12, color: T.accent }}>{fmt(deposit)}</span></td>
+                    <td>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                        background: `${statusColors[q.status]}20`,
+                        color: statusColors[q.status] || T.textMuted,
+                        border: `1px solid ${statusColors[q.status]}40`,
+                      }}>
+                        {q.status}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{
+                        fontSize: 12, fontFamily: 'DM Mono',
+                        color: daysSince > 30 ? T.danger : daysSince > 14 ? T.warning : T.success,
+                      }}>
+                        {daysSince}d
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} style={{ textAlign: 'center', color: T.textMuted, padding: 32 }}>
+                  No hay cotizaciones con estos filtros
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {filtered.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: T.textMuted, padding: '0 4px' }}>
+            <span>{filtered.length} cotizaciones · Total: <strong style={{ color: T.text, fontFamily: 'DM Mono' }}>{fmt(filtered.reduce((s, q) => s + (q.total || 0), 0))}</strong></span>
+            <span>Pagadas: <strong style={{ color: T.success, fontFamily: 'DM Mono' }}>{fmt(filtered.filter(q => q.status === 'paid').reduce((s, q) => s + (q.total || 0), 0))}</strong></span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── COMPANY ADMIN PANEL ──────────────────────────────────────────────────────
 function CompanyAdminPanel({ appData, auth }) {
-  const [tab, setTab] = useState("team");
+  const [tab, setTab] = useState("dashboard");
   const [contractors, setContractors] = useState([]);
   const [quotes, setQuotes] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -1951,10 +2307,15 @@ function CompanyAdminPanel({ appData, auth }) {
       </div>
 
       <div className="admin-nav">
-        {[{ id: "team", label: "👥 My Team" }, { id: "quotes", label: "📋 Quotes" }, { id: "billing", label: "💳 Billing" }, { id: "catalog", label: "🪟 My Catalog" }].map(t => (
+        {[{ id: "dashboard", label: "📊 Dashboard" }, { id: "team", label: "👥 My Team" }, { id: "quotes", label: "📋 Quotes" }, { id: "billing", label: "💳 Billing" }, { id: "catalog", label: "🪟 My Catalog" }].map(t => (
           <button key={t.id} className={`admin-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
+
+      {/* DASHBOARD TAB */}
+      {tab === "dashboard" && (
+        <TeamDashboard quotes={quotes} contractors={contractors} />
+      )}
 
       {/* TEAM TAB */}
       {tab === "team" && (
