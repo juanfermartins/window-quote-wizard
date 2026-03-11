@@ -712,6 +712,10 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
         </div>
       ))}
 
+      {/* file input always in DOM so scan works */}
+      <input ref={fileRef} type="file" accept="image/*" capture="environment"
+        style={{display:'none'}} onChange={handleScan}/>
+
       {!show && (
         <div style={{display:'flex',gap:10,marginBottom:4}}>
           <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setShow(true)}>
@@ -721,14 +725,17 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
             onClick={()=>fileRef.current?.click()} disabled={scanning}>
             {scanning ? '🔍 Analyzing...' : '📷 Scan Photo'}
           </button>
-          {/* accepts both camera and file picker — on mobile opens camera directly */}
-          <input ref={fileRef} type="file" accept="image/*" capture="environment"
-            style={{display:'none'}} onChange={handleScan}/>
         </div>
       )}
       {show && (
         <div className="card fade-up">
-          <div style={{fontWeight:700,fontSize:15,marginBottom:16}}>{editIdx!==null?"Edit Window":"New Window"}</div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <div style={{fontWeight:700,fontSize:15}}>{editIdx!==null?"Edit Window":"New Window"}</div>
+            <button className="btn btn-secondary btn-sm" style={{color:T.accent,borderColor:T.accent,fontSize:12}}
+              onClick={()=>fileRef.current?.click()} disabled={scanning}>
+              {scanning ? '🔍 Analyzing...' : '📷 Scan'}
+            </button>
+          </div>
           <div className="field"><label className="label">Type</label>
             <div className="pill-group">{products.map(p=><div key={p.id} className={`pill ${form.type===p.name?'selected':''}`} onClick={()=>setForm({...form,type:p.name})}>{p.name}</div>)}</div></div>
           <div className="row">
