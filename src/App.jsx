@@ -68,7 +68,7 @@ const T18N = {
   aiNotes:          { en: '🤖 AI Scan Details', es: '🤖 Detalles del Escaneo IA' },
   aiRawDesc:        { en: 'AI description:', es: 'Descripción IA:' },
   aiScanned:        { en: '📷 AI Scanned', es: '📷 Escaneado por IA' },
-  measureTip:       { en: '💡 Tip: place your phone next to the window before shooting for more accurate measurements.', es: '💡 Tip: coloca tu teléfono junto a la ventana antes de tomar la foto para medidas más precisas.' },
+  measureTip:       { en: '💡 Tip: place a credit card, coin, or ruler next to the window for more accurate measurements.', es: '💡 Tip: coloca una tarjeta de crédito, moneda o regla junto a la ventana para medidas más precisas.' },
   refUsed:          { en: '📏 Measured using:', es: '📏 Medido usando:' },
   refEstimate:      { en: '📐 Estimated (no reference)', es: '📐 Estimado (sin referencia)' },
   confidence:       { en: 'Confidence:',         es: 'Confianza:' },
