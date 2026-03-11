@@ -68,6 +68,9 @@ const T18N = {
   aiNotes:          { en: '🤖 AI Scan Details', es: '🤖 Detalles del Escaneo IA' },
   aiRawDesc:        { en: 'AI description:', es: 'Descripción IA:' },
   aiScanned:        { en: '📷 AI Scanned', es: '📷 Escaneado por IA' },
+  measureTip:       { en: '💡 Tip: place your phone next to the window before shooting for more accurate measurements.', es: '💡 Tip: coloca tu teléfono junto a la ventana antes de tomar la foto para medidas más precisas.' },
+  refUsed:          { en: '📏 Measured using:', es: '📏 Medido usando:' },
+  refEstimate:      { en: '📐 Estimated (no reference)', es: '📐 Estimado (sin referencia)' },
   confidence:       { en: 'Confidence:',         es: 'Confianza:' },
   windowType:       { en: 'Type',                es: 'Tipo' },
   material:         { en: 'Material',            es: 'Material' },
@@ -775,6 +778,8 @@ function QuoteDetailModal({ quote, onClose, onStatusChange }) {
                   <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',marginBottom:4}}>
                     <span style={{fontWeight:700,color:'#1D4ED8'}}>Window {i+1}</span>
                     {a.confidence && <span className="badge badge-blue" style={{fontSize:10}}>confidence: {a.confidence}</span>}
+                    {a.measured_with_reference && <span className="badge badge-green" style={{fontSize:10}}>📏 {a.reference_object}</span>}
+                    {a.measured_with_reference === false && <span className="badge badge-gray" style={{fontSize:10}}>📐 estimated</span>}
                     {a.no_match && <span className="badge badge-red" style={{fontSize:10}}>⚠ No match</span>}
                     {a.custom_price && <span className="badge badge-orange" style={{fontSize:10}}>✏ Manual: ${a.custom_price}</span>}
                     {!a.no_match && <span className="badge badge-green" style={{fontSize:10}}>✓ Matched → {a.window_type_selected}</span>}
@@ -1134,6 +1139,8 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
       ai_no_match: !!form._aiNoMatch,
       ai_custom_price: form._customPrice ? Number(form._customPrice) : null,
       ai_photo_url: form._photoUrl || scanPhotoUrl || null,
+      ai_measured_with_ref: scanResult?.measured_with_reference || false,
+      ai_reference_object: scanResult?.reference_object || null,
     } : {};
     const windowData = {...form, ...aiMeta, id: form.id || Date.now()};
     if(editIdx!==null){const u=[...windows];u[editIdx]=windowData;setWindows(u);setEditIdx(null);}
@@ -1196,9 +1203,19 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
           {scanPhotoUrl && (
             <img src={scanPhotoUrl} alt="scan" style={{width:52,height:52,objectFit:'cover',borderRadius:8,flexShrink:0,border:'2px solid #BBF7D0'}}/>
           )}
-          <div>
+          <div style={{flex:1}}>
             <strong>{t('aiDetected',lang)}</strong> {scanResult.type} · {scanResult.width}"×{scanResult.height}" · {t('confidence',lang)} {scanResult.confidence}
-            {scanResult.notes && <div style={{color:T.textMuted,marginTop:2}}>{scanResult.notes}</div>}
+            {scanResult.measured_with_reference && scanResult.reference_object && (
+              <div style={{marginTop:4,fontSize:11,color:'#059669',fontWeight:600}}>
+                {t('refUsed',lang)} {scanResult.reference_object}
+              </div>
+            )}
+            {scanResult.measured_with_reference === false && (
+              <div style={{marginTop:4,fontSize:11,color:T.textMuted}}>
+                {t('refEstimate',lang)}
+              </div>
+            )}
+            {scanResult.notes && <div style={{color:T.textMuted,marginTop:2,fontSize:12}}>{scanResult.notes}</div>}
           </div>
         </div>
       )}
@@ -1210,6 +1227,16 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
           <div style={{flex:1}}>
             <div style={{fontWeight:700,color:'#C2410C',marginBottom:4}}>{t('aiNoMatch',lang)}</div>
             <div style={{color:T.textMuted,marginBottom:6}}>{t('aiNoMatchSub',lang)}: <strong>"{scanResult.type}"</strong> {t('aiNoMatchSub2',lang)}</div>
+            {scanResult.measured_with_reference && scanResult.reference_object && (
+              <div style={{marginBottom:4,fontSize:11,color:'#059669',fontWeight:600}}>
+                {t('refUsed',lang)} {scanResult.reference_object}
+              </div>
+            )}
+            {scanResult.measured_with_reference === false && (
+              <div style={{marginBottom:4,fontSize:11,color:T.textMuted}}>
+                {t('refEstimate',lang)}
+              </div>
+            )}
             {scanResult.notes && <div style={{fontSize:12,color:T.textMuted,fontStyle:'italic',marginTop:4}}>"{scanResult.notes}"</div>}
           </div>
         </div>
@@ -1243,15 +1270,20 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
         style={{display:'none'}} onChange={handleScan}/>
 
       {!show && (
-        <div style={{display:'flex',gap:10,marginBottom:4}}>
-          <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setShow(true)}>
-            <Icon name="plus"/> {t('addWindow',lang)}
-          </button>
-          <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
-            onClick={()=>fileRef.current?.click()} disabled={scanning}>
-            {scanning ? t('analyzing',lang) : t('scanPhoto',lang)}
-          </button>
-        </div>
+        <>
+          <div style={{display:'flex',gap:10,marginBottom:8}}>
+            <button className="btn btn-secondary" style={{flex:1}} onClick={()=>setShow(true)}>
+              <Icon name="plus"/> {t('addWindow',lang)}
+            </button>
+            <button className="btn btn-secondary" style={{flex:1,color:T.accent,borderColor:T.accent}}
+              onClick={()=>fileRef.current?.click()} disabled={scanning}>
+              {scanning ? t('analyzing',lang) : t('scanPhoto',lang)}
+            </button>
+          </div>
+          <div style={{background:'#F0F9FF',border:'1px solid #BAE6FD',borderRadius:8,padding:'7px 10px',fontSize:11,color:'#0369A1',marginBottom:4}}>
+            {t('measureTip',lang)}
+          </div>
+        </>
       )}
       {show && (
         <div className="card fade-up">
@@ -1426,6 +1458,8 @@ function Step5({ customer, windows, selected, dbServices, zip, cityMap, downPct,
         no_match: w.ai_no_match,
         custom_price: w.ai_custom_price,
         photo_url: w.ai_photo_url || null,
+        measured_with_reference: w.ai_measured_with_ref || false,
+        reference_object: w.ai_reference_object || null,
       }));
 
     await supabase.from('quotes').insert({
