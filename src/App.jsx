@@ -712,8 +712,8 @@ function Step2({ windows, setWindows, products, matMult, colMult, glsMult, calcP
         </div>
       ))}
 
-      {/* file input always in DOM so scan works */}
-      <input ref={fileRef} type="file" accept="image/*" capture="environment"
+      {/* file input always in DOM */}
+      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp"
         style={{display:'none'}} onChange={handleScan}/>
 
       {!show && (
